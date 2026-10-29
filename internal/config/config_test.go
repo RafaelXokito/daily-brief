@@ -130,3 +130,20 @@ func TestLoadCreatesDefaultsAndRoundTrips(t *testing.T) {
 		t.Fatalf("round trip: %+v created %v err %v", again, created, err)
 	}
 }
+
+// history_days defaults to 3 when absent, 0 turns it off, and it must be
+// within 0-14.
+func TestHistoryDays(t *testing.T) {
+	cfg, err := loadYAML(t, "topics:\n  - name: A\n")
+	if err != nil || cfg.HistoryDays != 3 {
+		t.Fatalf("default history_days %d, %v", cfg.HistoryDays, err)
+	}
+	if cfg, err := loadYAML(t, "history_days: 0\ntopics:\n  - name: A\n"); err != nil || cfg.HistoryDays != 0 {
+		t.Errorf("history_days 0: %d, %v", cfg.HistoryDays, err)
+	}
+	for _, bad := range []string{"-1", "15"} {
+		if _, err := loadYAML(t, "history_days: "+bad+"\ntopics:\n  - name: A\n"); err == nil || !strings.Contains(err.Error(), "history_days") {
+			t.Errorf("history_days %s accepted: %v", bad, err)
+		}
+	}
+}

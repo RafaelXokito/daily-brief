@@ -51,9 +51,10 @@ func TestSubsetRunMergesIntoTodaysJournal(t *testing.T) {
 	if ov := j.Overview; ov.Markdown != "## Today's highlights\n\n- old" || !ov.Stale || !strings.Contains(ov.Render(), "may be out of date") {
 		t.Errorf("overview %+v, want the old one marked stale", ov)
 	}
-	// Kept sections count toward both tokens and budget.
-	if j.TokensUsed() != 325_000 || j.TokenBudget != 150_000+205_000 || j.Utilization() > 100 {
-		t.Errorf("tokens %d of %d", j.TokensUsed(), j.TokenBudget)
+	// Kept sections keep their tokens; the budget stays this run's, and
+	// each run's spend is recorded.
+	if j.TokensUsed() != 325_000 || j.TokenBudget != 150_000 || j.RunUsed() != 120_000 || j.TodayUsed() != 305_000+120_000 || j.Utilization() > 100 {
+		t.Errorf("tokens %d, run %d of %d, today %d", j.TokensUsed(), j.RunUsed(), j.TokenBudget, j.TodayUsed())
 	}
 	// The run's journal is updated to what was saved, as the TUI shows it.
 	if len(run.Sections) != 3 || !run.Overview.Stale {

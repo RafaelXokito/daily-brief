@@ -50,6 +50,7 @@ or the advisory task budget.
 token_budget: 0             # tokens per journal: a target and a cap kept by a safety margin; 0 = auto (recommended baseline)
 max_searches_per_topic: 0   # optional cap per research pass; 0 = derived from the budget
 max_read_minutes: 8         # the journal stays short enough to read in this many minutes
+history_days: 3             # earlier days' journals not to repeat (0-14); 0 = off
 concurrency: 3              # topics researched in parallel
 model: claude-opus-5-5
 effort: medium              # low | medium | high | xhigh | max
@@ -80,29 +81,30 @@ the estimated reading time and cost, and any warnings.
 
 - **Baseline.** Each topic is planned for 4 searches on the API providers (3
   with `claude-code`), plus about 10k tokens to write. That comes to roughly
-  138k tokens per topic on the API (a search typically costs about 32k: the
-  context read twice plus ~20k of results) and 145k with `claude-code`, plus
+  146k tokens per topic on the API (a search typically costs about 34k: the
+  context, planned at 6k with a full history block, read twice plus ~20k of
+  results) and 145k with `claude-code`, plus
   15k for the overview. On the API a search may only start when its worst
-  case, about 208k on a fresh pass, is free (see below), so the baseline is at
-  least that per topic. It is also at least 1.49M, so that what can be left
+  case, about 213k on a fresh pass, is free (see below), so the baseline is at
+  least that per topic. It is also at least 1.51M, so that what can be left
   after the last search that fits stays under 20% of the budget even once a
   run has measured one large (45k) result, which raises every later search's
-  worst case to about 283k: (283k + 15k) / 0.2. That makes the API baseline
-  1.49M for 1-7 topics and about 208k per topic beyond. With
+  worst case to about 288k: (288k + 15k) / 0.2. That makes the API baseline
+  1.51M for 1-7 topics and about 213k per topic beyond. With
   `claude-code` it is raised, in steps of one search, until a planned run
   spends at least 85% despite the safety margin (see below): about 610-630k
   for 1-3 topics. Weights only split the baseline; they don't grow it.
   `token_budget: 0` uses the baseline. For a `-topics` run it uses those
   topics' weighted share of the baseline for all configured topics, raised to
   at least one search pass each plus the overview reserve (so `-topics AI`
-  out of 5 equal topics gets about 298k on the API, not the 1.49M floor).
+  out of 5 equal topics gets about 303k on the API, not the 1.51M floor).
   `daily-brief budget -topics …` shows both figures, and a run prints them
   as a note on stderr.
 - **Warnings.** These never block a run. You're warned when the budget is
   under half the baseline or can't fund one search per topic (topics will be
   thin or skipped), above 2× or 4× the baseline (it costs more, but the journal
   stays capped), or estimated at over $8 per run (the API baseline itself is
-  about $7.50 at the default prices). You're also warned when a
+  about $7.80 at the default prices). You're also warned when a
   topic's weight is too small to fund a pass of its own, when
   `max_read_minutes` forces topics down to one item or skips some, when
   `max_searches_per_topic` leaves most of the budget unspendable, and when a
@@ -148,9 +150,12 @@ the estimated reading time and cost, and any warnings.
   topic on the API (a fresh pass makes the next search cheap again) and 6
   with `claude-code`.
 - **Narrow pass.** If the run would still end below 90% of the budget, the
-  last of it (at least 8k tokens) funds one pass per topic that tightens and
-  re-ranks the digest without searching; its prompt says not to search. It is
-  the only pass that doesn't search, so a topic gets at most one per run.
+  last of it funds one pass per topic that tightens and
+  re-ranks the digest without searching; its prompt says not to search. Each
+  is allocated at least 8k tokens, and on the API at least what its request
+  needs to be sent (its prompt with the history and the digest, plus room to
+  write it), about 9-10k. It is the only pass that doesn't search, so a topic
+  gets at most one per run.
 - **The API search loop.** Each request offers one search (`max_uses: 1`)
   and the prompt asks for one search per turn. Claude searches once, writes its
   digest and ends the turn. If searches remain and the next request's worst
@@ -183,7 +188,8 @@ the estimated reading time and cost, and any warnings.
   covers draft text written before a refused search, the search calls and
   error blocks. Every iteration is counted as reading the results, though the
   first doesn't, which leaves another ~30k of margin. A fresh pass therefore
-  needs about 208k free to search, though a search usually costs 30-80k.
+  needs about 205-215k free to search (more with a long prior digest), though
+  a search usually costs 30-80k.
   A pass never starts with less than its first search needs. Once a later
   search doesn't fit, the pass keeps the digest it has (or, mid-turn,
   finishes it with a writing-only request, which takes one iteration and
@@ -210,10 +216,12 @@ the estimated reading time and cost, and any warnings.
   searches (six iterations), and goes over with five or more. As defence in
   depth, the run tracks what every pass has spent: once the run as a whole
   goes over its budget, no further request, pass or overview starts. The
-  overshoot is recorded in the journal (`overshoot`), shown in the TUI header
-  (`⚠ over budget by …`) and at the top of the Overview pane, noted at the
-  top of `-print` output, and repeated by `daily-brief budget` for today's
-  journal. The price of the margin is that runs on the API spend less of
+  overshoot is recorded in the journal (`overshoot`, and in the run's record
+  in `runs`), shown in the TUI header (`⚠ over budget by …`) and at the top
+  of the Overview pane, noted at the top of `-print` output, and repeated by
+  `daily-brief budget` for today's journal. These always describe the latest
+  run against its own budget; if an earlier run today went over, the spend
+  summary adds it apart, after today's total (`· 30.0k over earlier today`). The price of the margin is that runs on the API spend less of
   their budget, typically 80-90% at the baseline, and need a larger
   baseline than before.
 - **Enforcement on `claude-code`.** Claude Code runs the search loop itself
@@ -251,8 +259,65 @@ removed, however it is spelled. A topic never lists more sources than it has
 items. The overview is capped in code at 5 bullets and about 90 words. The
 estimated reading time appears in the TUI header.
 
+Research passes are told to strongly prefer primary sources (vendor
+advisories, release notes, official blogs, CISA/NVD, regulator or company
+announcements), then reputable outlets, over newsletter digests, directory
+sites and unofficial trackers, and to say briefly when an item rests only on
+a secondary source. This is guidance in the prompt; no domains are blocked.
+
 Web search is billed separately per search, on top of tokens. See Anthropic's
 pricing page.
+
+### Cross-day deduplication
+
+Yesterday's news shouldn't come back as new. Each research pass (first,
+top-up and narrow) is shown what the journals of the `history_days` (default
+3, at most 14) calendar days before today reported on its topic, as a
+compact block in its prompt:
+
+```
+<previously_reported>
+Tue 27 Oct · Widget 2.0 released · widget.dev/blog/2-0
+Mon 26 Oct · Critical flaw in Foo server · nvd.nist.gov/vuln/detail/CVE-2026-1234
+</previously_reported>
+```
+
+It is told not to repeat these, and to include one only if there is a
+material new development since: a release or patch shipped, a decision,
+ruling or vote, new figures or scope, an official response or a reversal.
+Commentary, recaps and the same news from another outlet don't count. Such an
+item is written as `### Update: <headline>` and starts with what is new
+("Since Mon: …"); it counts toward the topic's item cap and ranks like any
+other item. The TUI shows it as `↻ Update · …`, and the sidebar shows a
+muted count of a topic's updates (`↻2`). The marker and the count recognise
+the same forms: a heading, bullet or bold line starting `Update:`, bold or
+not. The overview prefers new stories
+over updates unless an update is major. A big story therefore only returns
+as an update; there is no separate "ongoing" list.
+
+This is done by the prompt alone: nothing is filtered or demoted in code.
+The history is built from the finished topics of those days' journals, by
+topic name (the overview is skipped, and so are today's journal and older
+ones; missing or corrupt journals are skipped silently). Each item's
+headline is its first line without heading, bullet or bold markers, an
+`Update:` prefix or the source links that end it; its link is the first link
+in the item, else a source whose title contains the headline, or is contained
+in it, word for word, else none. Only http(s) links count; they are compared
+without scheme, `www.`, default port, fragment, `utm_*` parameters or
+trailing `/`. An item reported on several days with the same link and
+headline (or, without a link, the same headline) is listed once, at its
+latest date; stories that share a link, such as a releases page, stay apart.
+Angle brackets in headlines and links, and in a prior digest, are replaced by
+`‹ ›`, so text from the web can't close the prompt's tags. A topic lists at most 12 items, newest first, and about 1,500
+characters. A `-topics` run gets history for the topics it researches only.
+
+The block costs input tokens on every request of a pass: up to about 800 by
+the API backend's generous estimate (2.5 characters a token), some 550 in
+practice, and nothing when there is no history (the prompt is then exactly
+as before). The API backend's reservations count it, since they are sized by
+the prompt really sent, and `daily-brief budget` plans each first request at
+6k tokens, which covers a full block, without reading any journals.
+`history_days: 0` turns it off.
 
 ## Usage
 
@@ -282,12 +347,30 @@ journal that can't be parsed is moved aside to `<date>.json.bak` (or
 note on stderr. Until then, opening today's journal reports the parse error;
 `-refresh` regenerates it. When
 you regenerate, a topic that fails this time keeps its earlier digest, with a
-note. A `-topics` run replaces only the topics it researched and keeps the
+note, and that digest's own tokens, searches and passes. A `-topics` run replaces only the topics it researched and keeps the
 others, in the TUI and with `-print`. Its overview is rewritten from the
 merged topics if the run's budget covers that; otherwise the earlier overview
 stays, marked as possibly out of date (as it does when a full run's overview
 fails). A `-topics` run keeps each topic's reading cap from the full config, so
-the merged journal stays within `max_read_minutes`. Its recorded overshoot is
-the sum of its own and the earlier runs' today, since all of it was spent.
+the merged journal stays within `max_read_minutes`. Like a full run, it
+records its own overshoot; earlier runs' stays in their records in `runs`.
 `-print` shows a saved
 journal without needing credentials.
+
+**What a journal records about spending.** Each section's `tokens_used`,
+`searches` and `passes` belong to the digest it shows: a digest kept from an
+earlier run keeps that run's figures. `allocated` is the sum of what the
+topic's passes were allocated (first pass plus top-ups and narrow pass), so
+it can be larger than the topic's share; journals saved before it was
+renamed call it `budget`, which is still read. `token_budget` is the budget of
+the latest run, never a sum of budgets. `runs` lists every run saved into the
+day's journal with its `budget`, what it `used` in all, and how much of that
+was `failed`: spent on topics, or the overview, that failed in that run, even
+when the journal shows an earlier digest in their place. A run in which every
+call failed therefore leaves the earlier digests and their figures as they
+were and adds a run record whose spend is all failed. The TUI header and
+`-print` show the latest run against its own budget, what it spent on failed
+topics, and what all of today's runs spent, e.g. `190.9k / 200.0k tokens
+(95%), 190.9k on failed topics · 645.9k today in 2 runs`, followed by
+`· 30.0k over earlier today` if an earlier run went over its budget. A journal saved
+before `runs` existed counts as one run.

@@ -21,10 +21,10 @@ func TestNewJournalSplitsBudgetByWeight(t *testing.T) {
 	cfg.Topics = []config.Topic{{Name: "A"}, {Name: "B", Weight: 3}}
 	j := NewGenerator(cfg, &claudeCodeBackend{cfg: cfg}).NewJournal()
 
-	if j.Overview.Budget != 10_000 {
-		t.Fatalf("overview reserve = %d, want 10000", j.Overview.Budget)
+	if j.Overview.Allocated != 10_000 {
+		t.Fatalf("overview reserve = %d, want 10000", j.Overview.Allocated)
 	}
-	if a, b := j.Sections[0].Budget, j.Sections[1].Budget; a != 47_500 || b != 142_500 {
+	if a, b := j.Sections[0].Allocated, j.Sections[1].Allocated; a != 47_500 || b != 142_500 {
 		t.Fatalf("budgets = %d, %d; want 47500, 142500", a, b)
 	}
 }

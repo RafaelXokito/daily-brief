@@ -12,11 +12,11 @@ import (
 func TestBaseline(t *testing.T) {
 	weighted := testConfig("anthropic", 0, "A", "B", "C", "D")
 	weighted.Topics = append(weighted.Topics, config.Topic{Name: "E", Weight: 2})
-	// An API topic plans 4 searches of 32k plus 10k to write, but a run of
+	// An API topic plans 4 searches of 34k plus 10k to write, but a run of
 	// 1-5 topics gets the floor that keeps its unspendable end under 20%
-	// after one 45k result: (282.75k search reserve at 45k + 15k overview)
+	// after one 45k result: (287.75k search reserve at 45k + 15k overview)
 	// / 0.2.
-	const apiFloor = 1_488_750
+	const apiFloor = 1_513_750
 	tests := []struct {
 		name string
 		cfg  config.Config
@@ -25,7 +25,7 @@ func TestBaseline(t *testing.T) {
 		{"api", testConfig("anthropic", 0, "A", "B", "C", "D", "E"), apiFloor},
 		{"aws floor", testConfig("aws", 0, "A"), apiFloor},
 		{"vertex floor", testConfig("vertex", 0, "A", "B"), apiFloor},
-		{"api many topics: one pass cost each", testConfig("anthropic", 0, topicNames(8)...), 8*207_750 + 15_000},
+		{"api many topics: one pass cost each", testConfig("anthropic", 0, topicNames(8)...), 8*212_750 + 15_000},
 		{"claude-code", testConfig("claude-code", 0, "A", "B", "C", "D", "E"), 5*145_000 + 15_000},
 		{"weights only split it", weighted, apiFloor},
 	}
@@ -45,8 +45,8 @@ func TestResolveBudget(t *testing.T) {
 	if ResolveBudget(&cfg) || cfg.TokenBudget != 123_000 {
 		t.Fatal("an explicit budget must be kept")
 	}
-	if g := NewGenerator(testConfig("anthropic", 0, "A"), &fakeBackend{}); g.cfg.TokenBudget != 1_488_750 {
-		t.Fatalf("generator budget = %d, want the 1488750 baseline", g.cfg.TokenBudget)
+	if g := NewGenerator(testConfig("anthropic", 0, "A"), &fakeBackend{}); g.cfg.TokenBudget != 1_513_750 {
+		t.Fatalf("generator budget = %d, want the 1513750 baseline", g.cfg.TokenBudget)
 	}
 }
 

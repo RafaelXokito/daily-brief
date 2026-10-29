@@ -20,7 +20,7 @@ import (
 // first it may write draft tokens of text. Results take their sizes from
 // results in turn. Usage is cumulative over the iterations, which are
 // listed too. Context is tracked per conversation, keyed by its first
-// message.
+// message; a request with only that message starts it afresh.
 type realistic struct {
 	results    []int64
 	retryEvery int
@@ -64,7 +64,9 @@ func (s *realistic) handle(_ int, r rawRequest) reply {
 	}
 	key := string(r.Messages[0])
 	c := s.convs[key]
-	if c == nil {
+	// A request with one message starts a pass: a new conversation, even if
+	// an earlier pass sent the same first message.
+	if c == nil || len(r.Messages) == 1 {
 		c = &conv{last: int64(len(body))/4 + searchToolTokens}
 		s.convs[key] = c
 	} else if last := r.Messages[len(r.Messages)-1]; strings.Contains(string(last), `"role":"user"`) {

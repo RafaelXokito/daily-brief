@@ -68,6 +68,10 @@ type Config struct {
 	PriceInputPerMTok  float64 `yaml:"price_input_per_mtok"`
 	PriceOutputPerMTok float64 `yaml:"price_output_per_mtok"`
 	PricePer1KSearches float64 `yaml:"price_per_1k_searches"`
+	// HistoryDays is how many days before today's journals are read so
+	// that research passes don't repeat what they reported, unless it has
+	// developed. 0 turns this off.
+	HistoryDays int `yaml:"history_days"`
 	// Concurrency is how many topics are researched in parallel.
 	Concurrency int    `yaml:"concurrency"`
 	Model       string `yaml:"model"`
@@ -87,6 +91,7 @@ func Default() Config {
 		Provider:           Provider{Type: "claude-code"},
 		Concurrency:        3,
 		MaxReadMinutes:     8,
+		HistoryDays:        3,
 		PriceInputPerMTok:  4,
 		PriceOutputPerMTok: 20,
 		PricePer1KSearches: 10,
@@ -154,6 +159,8 @@ func Save(path string, cfg Config) error {
 		"#               0 = auto (the recommended baseline, see `daily-brief budget`).\n" +
 		"# max_searches_per_topic: optional cap per research pass; 0 = derived from the budget.\n" +
 		"# max_read_minutes: the journal is kept short enough to read in this many minutes.\n" +
+		"# history_days: earlier days' journals (0-14) whose items are not repeated unless they have a material\n" +
+		"#               new development, then shown as an update; 0 = off.\n" +
 		"# price_*: USD prices used only to estimate the cost of API runs.\n" +
 		"# weight: optional per-topic multiplier for its share of the budget.\n"
 	return os.WriteFile(path, append([]byte(header), data...), 0o644)
@@ -174,6 +181,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaxReadMinutes < 1 {
 		return errors.New("config: max_read_minutes must be at least 1")
+	}
+	if c.HistoryDays < 0 || c.HistoryDays > 14 {
+		return errors.New("config: history_days must be between 0 (off) and 14")
 	}
 	if c.PriceInputPerMTok < 0 || c.PriceOutputPerMTok < 0 || c.PricePer1KSearches < 0 {
 		return errors.New("config: prices must not be negative")

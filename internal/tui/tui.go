@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rafaelpereira/daily-brief/internal/brief"
 )
@@ -246,6 +247,7 @@ func (m *Model) refresh() {
 	default:
 		md = "## " + s.Topic + "\n\n" + s.Render()
 	}
+	md = markUpdates(md)
 	warnings := m.journal.BudgetWarnings
 	if note := m.journal.OvershootNote(); note != "" {
 		warnings = append([]string{note}, warnings...)
@@ -253,7 +255,7 @@ func (m *Model) refresh() {
 	if m.selected == 0 && len(warnings) > 0 {
 		var w strings.Builder
 		for _, msg := range warnings {
-			w.WriteString("> ⚠ " + msg + "\n>\n")
+			w.WriteString("> **Warning:** " + msg + "\n>\n")
 		}
 		md = strings.TrimSuffix(w.String(), ">\n") + "\n" + md
 	}
@@ -273,8 +275,7 @@ func (m *Model) View() string {
 	j := m.journal
 	header := titleStyle.Render("Daily Brief") + "  " + mutedStyle.Render(j.Date) +
 		"  " + mutedStyle.Render("· "+j.Provider) +
-		"  " + mutedStyle.Render(fmt.Sprintf("· %s / %s tokens (%.0f%%) · ~%.0f min read",
-		brief.HumanTokens(j.TokensUsed()), brief.HumanTokens(j.TokenBudget), j.Utilization(), max(1, j.ReadMinutes())))
+		"  " + mutedStyle.Render(fmt.Sprintf("· %s · ~%.0f min read", j.SpendSummary(), max(1, j.ReadMinutes())))
 	switch j.BudgetLevel {
 	case "", brief.LevelOK:
 	case brief.LevelCostly:
@@ -316,27 +317,41 @@ func (m *Model) sidebar() string {
 		case brief.StatusFailed:
 			icon = lipgloss.NewStyle().Foreground(errColor).Render("✗")
 		}
-		name := truncate(s.Topic, sidebarWidth-10)
-		line := fmt.Sprintf("%s %s", icon, name)
+		var counts []string
+		if n := s.Updates(); n > 0 {
+			counts = append(counts, fmt.Sprintf("↻%d", n))
+		}
+		if s.TokensUsed > 0 {
+			counts = append(counts, brief.HumanTokens(s.TokensUsed))
+		}
+		count := strings.Join(counts, " ")
+		// The row is "▸ ✓ name  ↻N 12.3k" within the box's sidebarWidth-1
+		// cells, with at least one space before the counts.
+		room := sidebarWidth - 1 - 2 - lipgloss.Width(icon) - 1 - 1 - lipgloss.Width(count)
+		name := truncate(s.Topic, room)
+		line := "  " + icon + " " + name
 		if i == m.selected {
 			line = selStyle.Render("▸ ") + icon + " " + selStyle.Render(name)
-		} else {
-			line = "  " + line
 		}
-		tokens := ""
-		if s.TokensUsed > 0 {
-			tokens = brief.HumanTokens(s.TokensUsed)
-		}
-		pad := max(1, sidebarWidth-1-lipgloss.Width(line)-len(tokens))
-		b.WriteString(line + strings.Repeat(" ", pad) + mutedStyle.Render(tokens) + "\n")
+		pad := max(1, sidebarWidth-1-lipgloss.Width(line)-lipgloss.Width(count))
+		b.WriteString(line + strings.Repeat(" ", pad) + mutedStyle.Render(count) + "\n")
 	}
 	return b.String()
 }
 
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
+// markUpdates shows items written as updates to news an earlier day
+// reported as "↻ Update · …": the lines brief.Section.Updates counts.
+func markUpdates(md string) string {
+	lines := strings.Split(md, "\n")
+	for i, l := range lines {
+		if lead, headline, ok := brief.SplitUpdate(l); ok {
+			lines[i] = lead + "↻ Update · " + headline
+		}
 	}
-	return string(r[:n-1]) + "…"
+	return strings.Join(lines, "\n")
+}
+
+// truncate cuts s to at most n cells, marking a cut with "…".
+func truncate(s string, n int) string {
+	return ansi.Truncate(s, max(0, n), "…")
 }

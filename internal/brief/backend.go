@@ -35,6 +35,9 @@ type Task struct {
 	// Prior is the digest a top-up pass deepens or widens; empty for the
 	// first pass.
 	Prior string
+	// History is what earlier days' journals reported on the topic, which
+	// the pass is told not to repeat without a material new development.
+	History []Reported
 
 	// meter, if set, ties the pass to its run's pool: the API backend
 	// charges each response to it as it goes and stops when the run has no

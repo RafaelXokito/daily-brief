@@ -153,8 +153,7 @@ func printJournal(gen *brief.Generator, journal *brief.Journal) error {
 		}
 		// Saving merges the run into the journal saved earlier today.
 		saveErr := brief.SaveJournal(journal)
-		fmt.Fprintf(os.Stderr, "Used %d of %d tokens (%.0f%%), ~%.0f min read.\n",
-			journal.TokensUsed(), journal.TokenBudget, journal.Utilization(), max(1, journal.ReadMinutes()))
+		fmt.Fprintf(os.Stderr, "This run: %s, ~%.0f min read.\n", journal.SpendSummary(), max(1, journal.ReadMinutes()))
 		if note := journal.OvershootNote(); note != "" {
 			fmt.Fprintln(os.Stderr, "Warning:", note)
 		}

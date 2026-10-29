@@ -39,3 +39,29 @@ func TestViewShowsSectionsAndContent(t *testing.T) {
 		t.Log("\n" + m.View())
 	}
 }
+
+// Updates to earlier news get a visible marker, and the sidebar a muted
+// count of them; the header shows the latest run against its budget and
+// what today's runs spent.
+func TestViewMarksUpdates(t *testing.T) {
+	j := &brief.Journal{
+		Date: "2026-10-29", TokenBudget: 200_000,
+		Overview: brief.Section{Topic: "Overview", Status: brief.StatusDone, Markdown: "## Today's highlights\n\n- x"},
+		Sections: []*brief.Section{
+			{Topic: "Security", Status: brief.StatusDone, Markdown: "### Update: Widget breach grows\nSince Mon: more.\n\n### New CVE\nPatch."},
+		},
+		Runs: []brief.RunRecord{{Budget: 700_000, Used: 600_000}, {Budget: 200_000, Used: 150_000, Failed: 150_000}},
+	}
+	m := New(nil, nil, j, "notty")
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	view := m.View()
+	for _, want := range []string{"↻1", "150.0k / 200.0k tokens (75%)", "on failed topics", "750.0k today in 2 runs"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q:\n%s", want, view)
+		}
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if view := m.View(); !strings.Contains(view, "↻ Update · Widget breach grows") || strings.Contains(view, "Update: Widget") {
+		t.Errorf("update heading not marked:\n%s", view)
+	}
+}

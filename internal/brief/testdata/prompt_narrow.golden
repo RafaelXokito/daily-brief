@@ -1,0 +1,16 @@
+Today is {{TODAY}}.
+
+Topic: Security
+What I care about: Critical CVEs.
+
+You have about 8.0k tokens for this and no web searches.
+Write at most 6 items and at most 270 words in total.
+
+This digest was written earlier today:
+
+<digest>
+### Old item
+Something happened. [source](https://a.example/x)
+</digest>
+
+Do not search. Tighten it: rank the most consequential items first, cut weak or stale ones and make every item concise. Reply with the full revised digest within the limits above.

@@ -17,8 +17,11 @@ const (
 	// covers the prompt, context resends and writing the digest.
 	planFactor = 0.85
 	// Context a pass's first request is planned with: system prompt, task
-	// prompt, a prior digest and the search tool.
-	planWindow = 5_000
+	// prompt with a full history block (see LoadHistory, about 0.8k by
+	// estimateTokens) and the search tool, about 5.6k for the default
+	// topics. A top-up's prior digest may add more: need sizes a pass by
+	// the window it really sends.
+	planWindow = 6_000
 	// Tokens one search's results are planned to add, the middle of the
 	// usual 10-30k, and what a search request is planned to write.
 	typicalResult = 20_000
@@ -32,7 +35,8 @@ const (
 	// Most tokens set aside for the overview.
 	maxOverviewReserve = 15_000
 	// Least budget for a narrow pass, which rewrites a digest without
-	// searching.
+	// searching. On the API a pass is allocated at least what its request
+	// needs to be sent, about 9-10k (see narrowNeed).
 	narrowMin = 8_000
 	// Least share of the budget a run aims to spend: on the API, less,
 	// since each search must fit a worst case several times what it
@@ -580,7 +584,8 @@ func (p *planBackend) Name() string { return "plan" }
 // estimate does not depend on scheduling. It returns the journal and the
 // passes in the order they ran.
 func planRun(cfg config.Config) (*Journal, []Task) {
-	cfg.Concurrency = 1
+	// The plan reads no journals: planWindow allows for a full history.
+	cfg.Concurrency, cfg.HistoryDays = 1, 0
 	b := &planBackend{provider: cfg.Provider.Type}
 	g := NewGenerator(cfg, b)
 	g.partial = false

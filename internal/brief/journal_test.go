@@ -42,8 +42,13 @@ func TestSaveJournalSkipsEmptyAndKeepsEarlierDigests(t *testing.T) {
 		t.Fatalf("load: %v %v", j, err)
 	}
 	a, b := j.Sections[0], j.Sections[1]
-	if a.Status != StatusDone || a.Markdown != "### Old A" || len(a.Sources) != 1 || a.TokensUsed != 500 || a.Error == "" {
+	// A keeps the earlier digest's figures; the 500 tokens its refresh
+	// spent are in that run's record, as spent on a failed topic.
+	if a.Status != StatusDone || a.Markdown != "### Old A" || len(a.Sources) != 1 || a.TokensUsed != 0 || a.Error == "" {
 		t.Errorf("A after failed refresh: %+v", a)
+	}
+	if len(j.Runs) != 2 || j.Runs[1].Used != 500 || j.Runs[1].Failed != 500 {
+		t.Errorf("runs %+v; want the second spending 500 on failed topics", j.Runs)
 	}
 	if b.Markdown != "### New B" {
 		t.Errorf("B: %+v", b)
@@ -78,8 +83,9 @@ func TestMarkdownHeadsEachTopic(t *testing.T) {
 	}
 }
 
-// A run over some topics merged into today's journal keeps the earlier
-// runs' overshoot, added to its own.
+// A run over some topics merged into today's journal reports its own
+// overshoot against its own budget; the earlier runs' overshoot stays in
+// their run records and is shown apart, next to today's total.
 func TestSubsetMergeKeepsEarlierOvershoot(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	prev := &Journal{Date: Today(), TokenBudget: 600_000, Overshoot: 7_000,
@@ -93,8 +99,67 @@ func TestSubsetMergeKeepsEarlierOvershoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	j, err := LoadJournal(Today())
-	if err != nil || j == nil || j.Overshoot != 9_000 || j.OvershootNote() == "" {
-		t.Fatalf("saved %+v, %v; want overshoot 9000", j, err)
+	if err != nil || j == nil || j.Overshoot != 2_000 || j.Over() != 2_000 || j.EarlierOver() != 7_000 {
+		t.Fatalf("saved %+v, %v; want overshoot 2000, 7000 earlier", j, err)
+	}
+	if note := j.OvershootNote(); !strings.Contains(note, "by 2.0k tokens (1.0%)") {
+		t.Errorf("note %q", note)
+	}
+	if s := j.SpendSummary(); !strings.Contains(s, "7.0k over earlier today") {
+		t.Errorf("summary %q", s)
+	}
+}
+
+// A full run that went 30k over, then a run over some topics that spent
+// 250k of its 300k: the second run is not reported as over, against any
+// budget; the first run's overshoot is shown apart, next to today's total.
+// A later full run reports only its own overshoot.
+func TestOvershootIsPerRun(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	full := &Journal{Date: Today(), TokenBudget: 600_000, Overshoot: 30_000,
+		Sections: []*Section{
+			{Topic: "A", Status: StatusDone, Markdown: "### A", TokensUsed: 400_000},
+			{Topic: "B", Status: StatusDone, Markdown: "### B", TokensUsed: 230_000},
+		}}
+	if err := SaveJournal(full); err != nil {
+		t.Fatal(err)
+	}
+	if full.Over() != 30_000 || !strings.Contains(full.OvershootNote(), "by 30.0k tokens (5.0%)") {
+		t.Errorf("full run: over %d, note %q", full.Over(), full.OvershootNote())
+	}
+	run := &Journal{Date: Today(), TokenBudget: 300_000, Subset: true,
+		Sections: []*Section{{Topic: "B", Status: StatusDone, Markdown: "### B2", TokensUsed: 250_000}}}
+	if err := SaveJournal(run); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := LoadJournal(Today())
+	if err != nil || saved == nil {
+		t.Fatal(saved, err)
+	}
+	for name, j := range map[string]*Journal{"run": run, "saved": saved} {
+		if j.Over() != 0 || j.OvershootNote() != "" || strings.Contains(j.Markdown(), "went over") {
+			t.Errorf("%s: over %d, note %q", name, j.Over(), j.OvershootNote())
+		}
+		s := j.SpendSummary()
+		for _, want := range []string{"250.0k / 300.0k tokens (83%)", "880.0k today in 2 runs · 30.0k over earlier today"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s: summary %q lacks %q", name, s, want)
+			}
+		}
+	}
+	again := &Journal{Date: Today(), TokenBudget: 600_000, Overshoot: 6_000,
+		Sections: []*Section{
+			{Topic: "A", Status: StatusDone, Markdown: "### A3", TokensUsed: 300_000},
+			{Topic: "B", Status: StatusDone, Markdown: "### B3", TokensUsed: 306_000},
+		}}
+	if err := SaveJournal(again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Over() != 6_000 || again.EarlierOver() != 30_000 || !strings.Contains(again.OvershootNote(), "by 6.0k tokens (1.0%)") {
+		t.Errorf("later full run: over %d, earlier %d, note %q", again.Over(), again.EarlierOver(), again.OvershootNote())
+	}
+	if md := again.Markdown(); strings.Contains(md, "⚠") || !strings.Contains(md, "> **Warning:** This run went over") {
+		t.Errorf("overshoot note in the journal:\n%s", md)
 	}
 }
 

@@ -132,8 +132,8 @@ func checkRun(t *testing.T, label string, cfg config.Config, j *Journal, tasks [
 		}
 	}
 	for _, u := range updates {
-		if u.Section.Budget < 0 {
-			t.Errorf("%s: update for %q shows a negative budget %d", label, u.Section.Topic, u.Section.Budget)
+		if u.Section.Allocated < 0 {
+			t.Errorf("%s: update for %q shows a negative budget %d", label, u.Section.Topic, u.Section.Allocated)
 			break
 		}
 	}
@@ -372,8 +372,8 @@ func TestRunBudgetEdges(t *testing.T) {
 			if u := j.Utilization(); u < 85 {
 				t.Errorf("%s: 50M utilization %.1f%%", provider, u)
 			}
-			if j.Overview.Budget != maxOverviewReserve {
-				t.Errorf("%s: overview reserve %d, want the %d cap", provider, j.Overview.Budget, maxOverviewReserve)
+			if j.Overview.Allocated != maxOverviewReserve {
+				t.Errorf("%s: overview reserve %d, want the %d cap", provider, j.Overview.Allocated, maxOverviewReserve)
 			}
 			a := Assess(cfg)
 			if a.Level != LevelVeryHigh || a.ReadMinutes > float64(cfg.MaxReadMinutes) {
@@ -426,8 +426,8 @@ func TestOverspendStopsFurtherPasses(t *testing.T) {
 		}
 	}
 	for _, u := range ups {
-		if u.Section.Budget < 0 {
-			t.Errorf("update shows %q with a negative budget %d", u.Section.Topic, u.Section.Budget)
+		if u.Section.Allocated < 0 {
+			t.Errorf("update shows %q with a negative budget %d", u.Section.Topic, u.Section.Allocated)
 			break
 		}
 	}

@@ -22,7 +22,7 @@ Guidelines:
 - Cover only news from the last few days. Rank items by importance, most consequential first.
 - Stay within the item and word limits you are given. Fewer items is fine; never pad with stale, evergreen or marketing content.
 - If the topic itself is quiet, widen to closely related areas that had notable news (e.g. if Java is quiet, other languages and frameworks with notable releases or problems). Put those items last, after a line "**Related**".
-- Prefer primary sources (release notes, advisories, official announcements) over aggregators.
+- Strongly prefer primary sources: vendor advisories, release notes, official blogs, CISA/NVD, regulator or company announcements, then reputable news outlets. Avoid newsletter digests, directory sites and unofficial trackers; if only a secondary source exists, say so briefly in the item.
 - For security items, name the affected product and versions, severity/CVE if known, and the recommended action.
 - Do your research first and write nothing until you are done; your whole reply is the digest itself.
 
@@ -30,10 +30,22 @@ Format (Markdown, no top-level heading, no preamble or closing remarks):
 - Each item: "### <headline>" then at most 2 tight sentences on why it matters, ending with an inline link to the best source like [source](https://...).
 - If nothing notable happened, even in related areas, say so in one line.`
 
-const overviewSystemPrompt = `You write the opening of a personal morning briefing. Given digests for several topics, write "## Today's highlights" followed by 3-5 bullets naming the most important things across all topics, one line of at most 15 words each, most important first. Output Markdown only.`
+const overviewSystemPrompt = `You write the opening of a personal morning briefing. Given digests for several topics, write "## Today's highlights" followed by 3-5 bullets naming the most important things across all topics, one line of at most 15 words each, most important first. Prefer new stories over updates to earlier ones (items headed "Update:") unless an update is major. Output Markdown only.`
 
-// taskPrompt is the user prompt for a research, top-up or narrow pass.
+// historyInstruction follows the items earlier days' journals reported.
+const historyInstruction = `These were already in my journal on the dates shown. Do not repeat them. ` +
+	`Include one only if there is a material new development since then: a new fact, such as a release or patch shipped, a decision, ruling or vote, ` +
+	`new figures or scope (more affected versions, larger breach), an official response, or a reversal. ` +
+	`Commentary, recaps, opinion pieces or the same news from another outlet are not new. ` +
+	`Write such an item as "### Update: <headline>", and start it with what is new since the date shown (e.g. "Since Mon: …"). ` +
+	`Updates count toward the item limit and rank like any other item.`
+
+// taskPrompt is the user prompt for a research, top-up or narrow pass. With
+// history, it lists what earlier days reported (see LoadHistory). Angle
+// brackets in a prior digest are neutralised, as in history lines, so it
+// cannot close its own tag.
 func taskPrompt(t Task) string {
+	prior := untag(t.Prior)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Today is %s.\n\nTopic: %s\nWhat I care about: %s\n\n",
 		time.Now().Format("Monday, 2 January 2006"), t.Topic.Name, t.Topic.Focus)
@@ -43,15 +55,22 @@ func taskPrompt(t Task) string {
 		fmt.Fprintf(&b, "You have about %s tokens for this and no web searches.\n", HumanTokens(t.Budget))
 	}
 	fmt.Fprintf(&b, "Write at most %d items and at most %d words in total.", t.Items, t.Items*wordsPerItem)
+	if len(t.History) > 0 {
+		b.WriteString("\n\n<previously_reported>\n")
+		for _, r := range t.History {
+			b.WriteString(r.line() + "\n")
+		}
+		b.WriteString("</previously_reported>\n\n" + historyInstruction)
+	}
 	switch {
 	case t.Prior != "" && t.Searches > 0:
 		fmt.Fprintf(&b, "\n\nThis digest was written earlier today:\n\n<digest>\n%s\n</digest>\n\n"+
 			"Search for consequential items it missed. If the topic itself was quiet, widen to adjacent areas with notable news and put those items after a line \"**Related**\". "+
-			"Then reply with the full revised digest within the limits above, dropping weaker items to make room for stronger ones. If you find nothing better, return it unchanged.", t.Prior)
+			"Then reply with the full revised digest within the limits above, dropping weaker items to make room for stronger ones. If you find nothing better, return it unchanged.", prior)
 	case t.Prior != "":
 		fmt.Fprintf(&b, "\n\nThis digest was written earlier today:\n\n<digest>\n%s\n</digest>\n\n"+
 			"Do not search. Tighten it: rank the most consequential items first, cut weak or stale ones and make every item concise. "+
-			"Reply with the full revised digest within the limits above.", t.Prior)
+			"Reply with the full revised digest within the limits above.", prior)
 	}
 	return b.String()
 }
@@ -87,6 +106,8 @@ type Generator struct {
 	// partial is set when cfg covers only some of the configured topics:
 	// the run is merged into today's journal.
 	partial bool
+	// history is what earlier days reported, per topic, loaded by Run.
+	history map[string][]Reported
 }
 
 // NewGenerator resolves an auto (0) token budget to the baseline.
@@ -115,9 +136,9 @@ func (g *Generator) emptyJournal() *Journal {
 		Caps:        topicCaps(g.cfg),
 	}
 	reserve, shares := split(g.cfg)
-	j.Overview.Budget = reserve
+	j.Overview.Allocated = reserve
 	for i, t := range g.cfg.Topics {
-		j.Sections = append(j.Sections, &Section{Topic: t.Name, Status: StatusPending, Budget: shares[i]})
+		j.Sections = append(j.Sections, &Section{Topic: t.Name, Status: StatusPending, Allocated: shares[i]})
 	}
 	return j
 }
@@ -130,7 +151,7 @@ func (g *Generator) task(i int, budget int64, prior string) Task {
 	if prior == "" {
 		items = min(itemCeiling(s), items)
 	}
-	return Task{Topic: g.cfg.Topics[i], Budget: budget, Searches: s, Items: items, Prior: prior}
+	return Task{Topic: g.cfg.Topics[i], Budget: budget, Searches: s, Items: items, Prior: prior, History: g.history[g.cfg.Topics[i].Name]}
 }
 
 // needBudget is the budget a pass's prompt is sized with when working out
@@ -147,7 +168,7 @@ func (g *Generator) need(cal *calibration, i int, prior string) int64 {
 	if p == "claude-code" {
 		return passCost(p)
 	}
-	t := Task{Topic: g.cfg.Topics[i], Budget: needBudget, Searches: 1, Items: g.caps[i], Prior: prior}
+	t := Task{Topic: g.cfg.Topics[i], Budget: needBudget, Searches: 1, Items: g.caps[i], Prior: prior, History: g.history[g.cfg.Topics[i].Name]}
 	return max(passCost(p), cal.firstSearch(t))
 }
 
@@ -268,8 +289,9 @@ func (g *Generator) Run(ctx context.Context, j *Journal, updates chan<- Update) 
 		case <-ctx.Done():
 		}
 	}
-	p := &pool{total: j.TokenBudget - j.Overview.Budget, reserve: j.Overview.Budget, cal: newCalibration()}
+	p := &pool{total: j.TokenBudget - j.Overview.Allocated, reserve: j.Overview.Allocated, cal: newCalibration()}
 	others := g.others(j.Date)
+	g.history = g.loadHistory(j.Date)
 	g.research(ctx, j, p, send)
 	g.topUp(ctx, j, p, send)
 	g.narrow(ctx, j, p, others, send)
@@ -291,7 +313,7 @@ func (g *Generator) research(ctx context.Context, j *Journal, p *pool, send func
 	for i, sec := range j.Sections {
 		w := ws[i]
 		if w == 0 {
-			sec.Budget, sec.Status, sec.Error = 0, StatusFailed, skippedRead
+			sec.Allocated, sec.Status, sec.Error = 0, StatusFailed, skippedRead
 			send(i, sec)
 			continue
 		}
@@ -318,7 +340,7 @@ func (g *Generator) research(ctx context.Context, j *Journal, p *pool, send func
 			send(i, sec)
 			continue
 		}
-		sec.Budget, sec.Status = alloc, StatusRunning
+		sec.Allocated, sec.Status = alloc, StatusRunning
 		send(i, sec)
 		g.estimatePending(j, ws, i+1, p.free(), weights, send)
 		wg.Add(1)
@@ -337,9 +359,9 @@ func (g *Generator) estimatePending(j *Journal, ws []float64, from int, free int
 		if ws[i] == 0 {
 			continue
 		}
-		j.Sections[i].Budget = 0
+		j.Sections[i].Allocated = 0
 		if weights > 0 && free > 0 {
-			j.Sections[i].Budget = min(free, int64(float64(free)*ws[i]/weights))
+			j.Sections[i].Allocated = min(free, int64(float64(free)*ws[i]/weights))
 		}
 		send(i, j.Sections[i])
 	}
@@ -374,12 +396,29 @@ func (g *Generator) narrow(ctx context.Context, j *Journal, p *pool, others []*S
 		return
 	}
 	cands, score := g.candidates(j, false)
+	least := make([]int64, len(cands))
+	for k, i := range cands {
+		least[k] = g.narrowNeed(i, j.Sections[i].Markdown)
+	}
 	for n := len(cands); n > 0; n-- {
-		if room := g.spendable(p.free(), n, false); room >= int64(n)*narrowMin {
-			g.round(ctx, j, p, send, cands[:n], spread(room, repeat(narrowMin, n), cands[:n], score), false)
+		if room := g.spendable(p.free(), n, false); room >= sum(least[:n]) {
+			g.round(ctx, j, p, send, cands[:n], spread(room, least[:n], cands[:n], score), false)
 			return
 		}
 	}
+}
+
+// narrowNeed is the least a narrow pass over topic i, rewriting prior, can
+// be allocated: narrowMin, and on the API at least its request's window,
+// history and prior digest included, plus the least room a turn is started
+// with, so a funded narrow pass always sends its request.
+func (g *Generator) narrowNeed(i int, prior string) int64 {
+	if g.cfg.Provider.Type == "claude-code" {
+		return narrowMin
+	}
+	t := g.task(i, needBudget, prior)
+	t.Searches = 0
+	return max(narrowMin, firstWindow(t)+minTurnTokens)
 }
 
 // round runs a pass for each pick, at most Concurrency at a time, and
@@ -403,9 +442,9 @@ func (g *Generator) round(ctx context.Context, j *Journal, p *pool, send func(in
 		}
 		if sec.Status == StatusFailed {
 			// A topic skipped for budget gets its first pass.
-			sec.Budget, sec.Error = 0, ""
+			sec.Allocated, sec.Error = 0, ""
 		}
-		sec.Budget += alloc
+		sec.Allocated += alloc
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -449,9 +488,9 @@ func (g *Generator) pass(ctx context.Context, c *claim, i int, sec *Section, t T
 	res := g.backend.Research(ctx, t)
 	c.settle(res.Tokens)
 	if errors.Is(res.Err, errNoSearchRoom) && res.Tokens == 0 {
-		sec.Budget -= t.Budget
+		sec.Allocated -= t.Budget
 		if t.Prior == "" {
-			sec.Budget, sec.Status, sec.Error = 0, StatusFailed, skippedBudget
+			sec.Allocated, sec.Status, sec.Error = 0, StatusFailed, skippedBudget
 			if c.p.over() {
 				sec.Error = skippedOver
 			}
@@ -546,19 +585,11 @@ func sum(xs []int64) int64 {
 	return s
 }
 
-func repeat(x int64, n int) []int64 {
-	xs := make([]int64, n)
-	for k := range xs {
-		xs[k] = x
-	}
-	return xs
-}
-
 // passScore favours heavy topics, topics that used all their searches and
 // topics that came back thin, and decays with each pass already run.
 func (g *Generator) passScore(i int, sec *Section) float64 {
 	s := 1.0
-	if sec.Searches >= planSearches(g.cfg, sec.Budget) {
+	if sec.Searches >= planSearches(g.cfg, sec.Allocated) {
 		s += 0.5
 	}
 	if countItems(sec.Markdown)*2 <= g.caps[i] {
@@ -577,6 +608,16 @@ func (g *Generator) others(date string) []*Section {
 		return prev.Sections
 	}
 	return nil
+}
+
+// loadHistory loads what the history_days before date reported on the
+// topics this run researches.
+func (g *Generator) loadHistory(date string) map[string][]Reported {
+	names := make([]string, len(g.cfg.Topics))
+	for i, t := range g.cfg.Topics {
+		names[i] = t.Name
+	}
+	return LoadHistory(date, g.cfg.HistoryDays, names)
 }
 
 // overview summarizes the finished topics, and those of today's journal a
