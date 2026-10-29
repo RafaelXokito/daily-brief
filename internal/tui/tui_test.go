@@ -30,6 +30,7 @@ func TestViewShowsSectionsAndContent(t *testing.T) {
 		}
 	}
 
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft}) // focus Topics
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if view := m.View(); !strings.Contains(view, "rate limited") {
@@ -60,6 +61,7 @@ func TestViewMarksUpdates(t *testing.T) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
 	}
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft}) // focus Topics
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if view := m.View(); !strings.Contains(view, "↻ Update · Widget breach grows") || strings.Contains(view, "Update: Widget") {
 		t.Errorf("update heading not marked:\n%s", view)

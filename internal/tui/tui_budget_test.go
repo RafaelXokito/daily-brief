@@ -182,6 +182,7 @@ func TestOverviewShowsFullWarnings(t *testing.T) {
 	if !strings.Contains(v, "estimated cost is about $9.00 per run") || strings.Contains(v, "budget high") {
 		t.Errorf("overview pane lacks the warning text or mislabels cost:\n%s", v)
 	}
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft}) // focus Topics
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if strings.Contains(m.View(), "$9.00") {
 		t.Error("warning shown on a topic pane")

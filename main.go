@@ -120,8 +120,15 @@ func run() error {
 	if lipgloss.HasDarkBackground() {
 		style = "dark"
 	}
-	_, err = tea.NewProgram(tui.New(gen, backendErr, journal, style), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	_, err = tea.NewProgram(tui.New(gen, backendErr, journal, style), programOptions()...).Run()
 	return err
+}
+
+// programOptions leaves the mouse to the terminal, so text can always be
+// selected and copied natively; in the alternate screen, terminals send
+// the wheel as arrow keys, which scroll the focused Summary pane.
+func programOptions() []tea.ProgramOption {
+	return []tea.ProgramOption{tea.WithAltScreen()}
 }
 
 // parseArgs parses flags anywhere on the command line, so they may follow

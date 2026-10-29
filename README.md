@@ -335,8 +335,39 @@ the prompt really sent, and `daily-brief budget` plans each first request at
 Flags can go before or after a subcommand: `daily-brief budget -budget 1000000`
 and `daily-brief auth status -provider aws` both work.
 
-Keys: `↑/↓` or `tab` switch topic, `pgup/pgdn` or the mouse wheel scroll,
-`r` regenerates, and `q` quits. Quitting mid-run saves the topics already done.
+Keys: the TUI has two panes, Topics and Summary, and starts with Summary
+focused. The focused pane's title is in the accent colour. The TUI never
+captures the mouse, so you can always select and copy text with it; in the
+alternate screen, terminals such as Ghostty, WezTerm and Kitty send the wheel
+as `↑/↓`, which scroll the Summary.
+
+| Key | Action |
+| --- | --- |
+| `←` `h` | focus Topics |
+| `→` `l` `enter` | focus Summary |
+| `tab` `shift+tab` | switch pane |
+| `↑` `k` / `↓` `j` | Topics: previous / next topic (wraps; doesn't leave Topics). Summary: scroll a line |
+| `space` `pgdown` `f` `shift+↓` | page down |
+| `b` `pgup` `shift+↑` | page up |
+| `d` `ctrl+d` / `u` `ctrl+u` | half page down / up |
+| `g` `home` / `G` `end` | top / bottom |
+| `1`–`9` | jump to the section at that position (`1` = Overview) |
+| `?` | show or close the list of keys |
+| `esc` | close the list of keys, or focus Topics |
+| `r` | regenerate |
+| `q` `ctrl+c` | quit |
+
+The scrolling keys work in either pane, and every key except `r` works while a
+journal is being generated (`r` waits for the run to finish). Quitting mid-run
+saves the topics already done.
+
+The list of keys opens over the Summary pane. If it doesn't fit, `↑/↓`,
+`pgup/pgdn`, `space`, `b`, `g` and `G` scroll it, and a "↓ more" or "↑ more"
+hint shows when keys are hidden; `?` or `esc` closes it, and other keys are
+ignored while it is open. In a terminal smaller than 50×10 the Topics pane is
+hidden and the header names the topic shown; below 20×4 the TUI only says the
+terminal is too small. With more topics than fit, the Topics pane scrolls to
+keep the selected one in view.
 
 Journals are saved as JSON in `~/.local/share/daily-brief/journals/`. A journal
 in which no topic was summarized isn't saved, and a saved one like that is
