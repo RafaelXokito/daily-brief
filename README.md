@@ -140,3 +140,7 @@ Journals are saved as JSON, one file per day, in
 
 [docs/GUIDE.md](docs/GUIDE.md) covers budgeting, the safety margin, the
 overview, deduplication across days, settings and rendering in detail.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
