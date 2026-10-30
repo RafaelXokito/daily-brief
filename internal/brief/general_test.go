@@ -1,9 +1,11 @@
 package brief
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/RafaelXokito/daily-brief/internal/config"
 )
@@ -14,10 +16,32 @@ func withGeneral(cfg config.Config) config.Config {
 	return cfg
 }
 
-// The World section is budgeted as one more topic of weight 1: the
-// baseline grows by exactly one topic's share, and matches a config with
-// a plain extra topic.
-func TestGeneralBaselineGrowsByOneTopic(t *testing.T) {
+// The World section counts as one more topic of weight 1 when the
+// baseline is worked out: it always matches a config with a plain extra
+// topic. Beyond the floors that grows it by exactly one topic's share;
+// within them it may not (the API floor holds for 1-7 topics, and
+// claude-code's step-up gives 1 topic more than 2 get).
+func TestGeneralBaselineCountsWorldAsOneTopic(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		cfg     config.Config
+		off, on int64
+	}{
+		{"api floor", testConfig("anthropic", 0, "A"), 1_513_750, 1_513_750},
+		{"api floor, 6 topics", testConfig("anthropic", 0, topicNames(6)...), 1_513_750, 1_513_750},
+		{"claude-code, 1 topic", testConfig("claude-code", 0, "A"), Baseline(testConfig("claude-code", 0, "A")), Baseline(testConfig("claude-code", 0, "A", "B"))},
+	} {
+		off, on := Baseline(tt.cfg), Baseline(withGeneral(tt.cfg))
+		if off != tt.off || on != tt.on {
+			t.Errorf("%s: baseline %d off, %d on; want %d, %d", tt.name, off, on, tt.off, tt.on)
+		}
+		extra := tt.cfg
+		extra.Topics = append(slices.Clone(extra.Topics), config.Topic{Name: "X"})
+		if b := Baseline(extra); b != on {
+			t.Errorf("%s: baseline with general %d, with a plain extra topic %d", tt.name, on, b)
+		}
+	}
+	// Beyond the floors: exactly one topic's share more.
 	for _, tt := range []struct {
 		name     string
 		cfg      config.Config
@@ -179,4 +203,42 @@ func sectionNames(j *Journal) []string {
 		out = append(out, s.Topic)
 	}
 	return out
+}
+
+// A subset run's overview reads the saved journal's other sections fitted
+// to the current caps, as saving fits them: a World section saved while
+// general was on is not offered to the overview once it is off, nor kept.
+func TestSubsetOverviewSkipsDroppedSections(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	saved := &Journal{Date: Today(), TokenBudget: 600_000,
+		Overview: Section{Topic: "Overview", Status: StatusDone, Markdown: "## Today's highlights\n\n- old", TokensUsed: 5_000},
+		Sections: []*Section{
+			{Topic: "A", Status: StatusDone, Markdown: "### Old A", TokensUsed: 100_000},
+			{Topic: "B", Status: StatusDone, Markdown: "### Old B", TokensUsed: 100_000},
+			{Topic: config.WorldTopicName, Status: StatusDone, Markdown: "### Old world news", TokensUsed: 100_000},
+		}}
+	if err := SaveJournal(saved); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig("anthropic", 700_000, "A", "B") // general now off
+	if err := cfg.FilterTopics([]string{"b"}); err != nil {
+		t.Fatal(err)
+	}
+	b := &summaryBackend{scriptBackend: scriptBackend{research: func(context.Context, Task, int) Result {
+		return Result{Markdown: "### New B", Tokens: 50_000, Searches: 1}
+	}}}
+	j, _ := runWithin(t, context.Background(), cfg, b, 30*time.Second)
+	if !strings.Contains(b.input, "### Old A") || !strings.Contains(b.input, "### New B") {
+		t.Errorf("overview input lacks the kept sections:\n%s", b.input)
+	}
+	if strings.Contains(b.input, "Old world news") {
+		t.Errorf("overview input has a section saving drops:\n%s", b.input)
+	}
+	if err := SaveJournal(j); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadJournal(Today())
+	if names := sectionNames(got); !slices.Equal(names, []string{"A", "B"}) {
+		t.Errorf("saved sections %v", names)
+	}
 }

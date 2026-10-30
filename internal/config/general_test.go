@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -126,5 +127,39 @@ func TestSaveEditsGeneral(t *testing.T) {
 	data, _ := os.ReadFile(fresh)
 	if !strings.Contains(string(data), "general: false") {
 		t.Errorf("default file lacks general:\n%s", data)
+	}
+}
+
+// The reserved name is refused whatever ran first: FilterTopics may not
+// hide a configured topic that takes it behind the World section.
+func TestWorldNameReservedAfterFilter(t *testing.T) {
+	for _, pick := range [][]string{{"AI"}, {WorldTopicName}, {"AI", "world & hot topics"}} {
+		cfg := Default()
+		cfg.General = true
+		cfg.Topics = append(cfg.Topics, Topic{Name: "world & HOT topics"})
+		if err := cfg.FilterTopics(pick); err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("-topics %v: err %v", pick, err)
+		}
+	}
+}
+
+// The reading-cap error counts the World section and says so.
+func TestReadingCapErrorNamesWorld(t *testing.T) {
+	cfg := Default()
+	cfg.Topics = nil
+	for i := range 36 {
+		cfg.Topics = append(cfg.Topics, Topic{Name: fmt.Sprintf("T%02d", i)})
+	}
+	cfg.MaxReadMinutes = 1
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("36 topics in 1 minute: %v", err)
+	}
+	cfg.General = true
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "across 37 (36 + World & hot topics) topics") {
+		t.Errorf("err %v", err)
 	}
 }

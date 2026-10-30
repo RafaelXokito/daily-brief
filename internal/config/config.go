@@ -21,6 +21,9 @@ type Topic struct {
 	Focus string `yaml:"focus"`
 	// Weight scales this topic's share of the token budget (default 1).
 	Weight float64 `yaml:"weight,omitempty"`
+	// world marks the section general adds (see WorldTopic), never a
+	// configured topic, even one that takes its name.
+	world bool
 }
 
 // Provider selects how daily-brief connects to Claude.
@@ -100,8 +103,10 @@ type Config struct {
 	// the configured topics. Off by default.
 	General bool    `yaml:"general"`
 	Topics  []Topic `yaml:"topics"`
-	// AllTopics are the configured topics when FilterTopics kept only
-	// some of them; a run over the subset is merged with the rest.
+	// AllTopics are the effective topics (see EffectiveTopics: the
+	// configured ones, then the World section when general is on) when
+	// FilterTopics kept only some of them; a run over the subset is merged
+	// with the rest.
 	AllTopics []Topic `yaml:"-"`
 }
 
@@ -315,7 +320,11 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config: max_read_minutes must be between 1 and %d", MaxReadMinutes)
 	}
 	if n := max(len(c.EffectiveTopics()), len(c.AllTopics)); ReadableItems(c.MaxReadMinutes, n) == 0 {
-		return fmt.Errorf("config: max_read_minutes %d leaves no room for a single item across %d topics; raise it or remove topics", c.MaxReadMinutes, n)
+		across := fmt.Sprint(n)
+		if c.General {
+			across = fmt.Sprintf("%d (%d + %s)", n, n-1, WorldTopicName)
+		}
+		return fmt.Errorf("config: max_read_minutes %d leaves no room for a single item across %s topics; raise it or remove topics", c.MaxReadMinutes, across)
 	}
 	if c.HistoryDays < 0 || c.HistoryDays > 14 {
 		return errors.New("config: history_days must be between 0 (off) and 14")
@@ -338,16 +347,9 @@ func (c Config) Validate() error {
 	if err := c.Provider.Validate(); err != nil {
 		return err
 	}
-	// A filtered config's topics may include the World section; the
-	// configured ones are in AllTopics, with it last when general is on.
-	user, allowed := c.Topics, 0
-	if c.AllTopics != nil {
-		user = c.AllTopics
-		if c.General {
-			allowed = 1
-		}
-	}
-	if countWorld(user) > allowed {
+	// Only the section general adds may take its name, whether or not
+	// FilterTopics ran.
+	if slices.ContainsFunc(slices.Concat(c.Topics, c.AllTopics), reservedName) {
 		return fmt.Errorf("config: the topic name %q is reserved for the general section; rename that topic", WorldTopicName)
 	}
 	lo, hi := math.Inf(1), 0.0
@@ -417,16 +419,12 @@ func ReadableItems(minutes, topics int) int {
 // take it (case-insensitive).
 const WorldTopicName = "World & hot topics"
 
-func isWorld(t Topic) bool { return strings.EqualFold(strings.TrimSpace(t.Name), WorldTopicName) }
+func isWorld(t Topic) bool { return t.world }
 
-func countWorld(ts []Topic) int {
-	n := 0
-	for _, t := range ts {
-		if isWorld(t) {
-			n++
-		}
-	}
-	return n
+// reservedName reports whether t is a configured topic that takes the
+// World section's name (case-insensitive).
+func reservedName(t Topic) bool {
+	return !t.world && strings.EqualFold(strings.TrimSpace(t.Name), WorldTopicName)
 }
 
 // WorldTopic is the section general adds beside topics, told to skip
@@ -442,14 +440,16 @@ func WorldTopic(topics []Topic) Topic {
 		Focus: "The most significant world events and the stories trending today across politics, economy, science and society. " +
 			"Skip anything the reader's other topics already cover: " + strings.Join(names, ", ") + ". " +
 			"Prefer primary or reputable sources; no rumours.",
+		world: true,
 	}
 }
 
 // EffectiveTopics are the topics a run researches and budgets for: the
 // configured ones, then the World section when general is on. Topics that
-// already include it, and those FilterTopics kept (chosen among the
-// effective ones), are returned as they are, so applying it again changes
-// nothing.
+// already include that section, and those FilterTopics kept (chosen among
+// the effective ones), are returned as they are, so applying it again
+// changes nothing. A configured topic merely named like it does not count:
+// Validate rejects it.
 func (c Config) EffectiveTopics() []Topic {
 	if !c.General || c.AllTopics != nil || slices.ContainsFunc(c.Topics, isWorld) {
 		return c.Topics

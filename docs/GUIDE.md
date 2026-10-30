@@ -194,9 +194,10 @@ the estimated reading time and cost, and any warnings.
   `claude-code` it is raised, in steps of one search, until a planned run
   spends at least 85% despite the safety margin (see below): about 610-630k
   for 1-3 topics. Weights only split the baseline; they don't grow it. With
-  `general: true` the World & hot topics section counts as one more topic, so
-  the baseline grows by one topic's share, and the whole run, that section
-  included, stays within `token_budget`.
+  `general: true` the World & hot topics section counts as one more topic
+  when the baseline is worked out (so beyond the floors above it adds one
+  topic's share, while within them the baseline may not change), and the
+  whole run, that section included, stays within `token_budget`.
   `token_budget: 0` uses the baseline. For a `-topics` run it uses those
   topics' weighted share of the baseline for all configured topics, raised to
   at least one search pass each plus the overview reserve (so `-topics AI`

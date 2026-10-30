@@ -680,12 +680,16 @@ func (g *Generator) passScore(i int, sec *Section) float64 {
 }
 
 // others are the sections of today's saved journal that a run over some
-// of the topics is merged with.
+// of the topics is merged with, fitted to the current item caps as saving
+// fits them (see fitCaps), so the overview never highlights an item the
+// merge drops: one of a topic no longer configured, such as the World
+// section after general was turned off, or beyond its topic's cap.
 func (g *Generator) others(date string) []*Section {
 	if !g.partial {
 		return nil
 	}
 	if prev, err := LoadJournal(date); err == nil && prev != nil {
+		fitCaps(prev, topicCaps(g.cfg))
 		return prev.Sections
 	}
 	return nil
