@@ -1,0 +1,18 @@
+Today is {{TODAY}}.
+
+Topic: Security
+What I care about: Critical CVEs.
+
+You have about 8.0k tokens for this and no web searches.
+Write at most 3 items and at most 135 words in total.
+
+<reader_profile>
+Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor
+</reader_profile>
+Where an item affects this reader's stack or holdings, say so in why it matters (e.g. "affects your Quarkus 3.x apps") and rank it higher; it may be tagged `ACT`.
+
+Do not include items mainly about:
+<muted>
+- crypto
+- celebrity tech gossip
+</muted>

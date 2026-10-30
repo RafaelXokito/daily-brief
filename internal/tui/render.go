@@ -242,18 +242,20 @@ func validOSC8(body string) bool {
 // are removed, digest markers are shown as such (see preRender), http(s)
 // links become OSC 8 hyperlinks that never break when wrapped, and no line
 // is wider than width. Markdown that cannot be rendered comes back as it
-// is, without control characters.
+// is, without control characters. md is taken as one digest: its items'
+// tags (see brief.TagLines) show as badges.
 func Render(md string, width int, theme string) string {
-	out, _ := renderItems(md, width, theme, nil)
+	out, _ := renderItems(md, width, theme, nil, brief.TagLines(md))
 	return out
 }
 
 // renderItems is Render that also returns the rendered line each of
-// items, lines of md such as an item's heading, starts on.
-func renderItems(md string, width int, theme string, items []int) (string, []int) {
+// items, lines of md such as an item's heading, starts on. The lines tags
+// lists hold impact tags, shown as badges (see tagLine).
+func renderItems(md string, width int, theme string, items []int, tags map[int]bool) (string, []int) {
 	width = max(1, width)
 	md = sanitise(md)
-	pre, links, quotes := preRender(md, width, items)
+	pre, links, quotes := preRender(md, width, theme, items, tags)
 	renderers.Lock()
 	defer renderers.Unlock()
 	out, ok := renderWith(pre, width, theme)
@@ -374,24 +376,69 @@ func openLink(line string) string {
 	return open
 }
 
-// link is a hyperlink replaced by a placeholder until glamour is done.
+// link is a hyperlink, or text in a style of its own such as a tag's
+// badge, replaced by a placeholder until glamour is done.
 type link struct {
 	token, url, text string
 	id               int
+	style            *lipgloss.Style // for styled text, which has no url
 }
 
 type links []link
 
-// restore puts each link's hyperlink, underlined, in place of its token.
+// sgrRE matches an SGR sequence at the start of a string.
+var sgrRE = regexp.MustCompile(`^\x1b\[[0-9;:]*m`)
+
+// restore puts each link's hyperlink, underlined, in place of its token,
+// and styled text in its style. Styled text ends by resetting the
+// terminal's style, so the SGR sequence that preceded it on its line is
+// repeated after it, for the rest of a heading to stay bold.
 func (ls links) restore(s string) string {
 	if len(ls) == 0 {
 		return s
 	}
-	pairs := make([]string, 0, 2*len(ls))
-	for _, l := range ls {
-		pairs = append(pairs, l.token, hyperlink(l.url, l.text, l.id))
+	var b strings.Builder
+	sgr := ""
+	for i := 0; i < len(s); {
+		switch {
+		case s[i] == '\n':
+			sgr = ""
+		case s[i] == '\x1b':
+			if m := sgrRE.FindString(s[i:]); m != "" {
+				sgr = m
+				b.WriteString(m)
+				i += len(m)
+				continue
+			}
+		case strings.HasPrefix(s[i:], string(tokStart)):
+			if l, ok := ls.at(s[i:]); ok {
+				if l.style != nil {
+					b.WriteString(l.style.Render(l.text))
+					if sgr != "" && sgr != "\x1b[0m" && sgr != "\x1b[m" {
+						b.WriteString(sgr)
+					}
+				} else {
+					b.WriteString(hyperlink(l.url, l.text, l.id))
+				}
+				i += len(l.token)
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
 	}
-	return strings.NewReplacer(pairs...).Replace(s)
+	return b.String()
+}
+
+// at is the link whose token s starts with.
+func (ls links) at(s string) (link, bool) {
+	rest := s[len(string(tokStart)):]
+	digits := len(rest) - len(strings.TrimLeft(rest, "0123456789"))
+	k, err := strconv.Atoi(rest[:digits])
+	if err != nil || k >= len(ls) || !strings.HasPrefix(s, ls[k].token) {
+		return link{}, false
+	}
+	return ls[k], true
 }
 
 // hyperlink is text linked to url, a URL from brief.SafeWebURL, with OSC
@@ -413,25 +460,33 @@ var (
 )
 
 // preRender rewrites sanitised Markdown for display; what is stored is
-// untouched. Updates show as "↻ Update · …" and a Related label as a rule
-// and a small heading; the lines items lists are marked with itemMark. Each http(s)
+// untouched. Updates show as "↻ Update · …", a Related label as a rule
+// and a small heading, and the impact tag on each line tags lists as a
+// badge (see tagLine): no other line, so never one in a code block or a
+// tag brief does not count; the lines items lists are marked with itemMark. Each http(s)
 // link becomes placeholder tokens of the width of its text: "↗ domain"
 // for [source](url) links and bare URLs, its title for others, and
 // "title · domain" in the Sources list; other links show as their title
 // alone, and never as a URL. Tokens hold no spaces, so glamour never
 // breaks one; a title gets a token per word (short words joined), so it
 // still wraps. Every token is cut to fit the width.
-func preRender(md string, width int, items []int) (string, links, []string) {
+func preRender(md string, width int, theme string, items []int, tags map[int]bool) (string, links, []string) {
 	var ls links
 	limit := max(6, width-2*docMargin-6) // list and quote indents
-	add := func(url, text string, id int) string {
-		text = truncate(text, limit)
-		tok := string(tokStart) + strconv.Itoa(len(ls)) + string(tokEnd)
-		if w, n := lipgloss.Width(text), lipgloss.Width(tok); w > n {
-			tok += strings.Repeat(string(tokPad), w-n)
+	token := func(l link) string {
+		l.text = truncate(l.text, limit)
+		l.token = string(tokStart) + strconv.Itoa(len(ls)) + string(tokEnd)
+		if w, n := lipgloss.Width(l.text), lipgloss.Width(l.token); w > n {
+			l.token += strings.Repeat(string(tokPad), w-n)
 		}
-		ls = append(ls, link{token: tok, url: url, text: text, id: id})
-		return tok
+		ls = append(ls, l)
+		return l.token
+	}
+	add := func(url, text string, id int) string {
+		return token(link{url: url, text: text, id: id})
+	}
+	styled := func(text string, st *lipgloss.Style) string {
+		return token(link{text: text, style: st})
 	}
 	linkText := func(raw, title string) string {
 		id := len(ls)
@@ -467,6 +522,15 @@ func preRender(md string, width int, items []int) (string, links, []string) {
 	}
 
 	lines := strings.Split(markUpdates(md), "\n")
+	for i, head := range tags {
+		if i >= 0 && i < len(lines) {
+			next := ""
+			if i+1 < len(lines) {
+				next = lines[i+1]
+			}
+			lines[i] = tagLine(lines[i], next, theme, head, styled)
+		}
+	}
 	for _, i := range items {
 		if i >= 0 && i < len(lines) {
 			n := len(itemPrefixRE.FindString(lines[i]))
@@ -514,6 +578,52 @@ func preRender(md string, width int, items []int) (string, links, []string) {
 	}
 	text, quotes := extractQuotes(strings.Join(lines, "\n"))
 	return text, ls, quotes
+}
+
+// tagLine shows a line that starts with an impact tag (see
+// brief.SplitTag) with a badge in its place: ACT in the accent of urgency,
+// WATCH in amber, FYI muted. On a body line (not head, the item's
+// headline), a line of facts after the tag, such as
+// "CVE-2026-1234 · CVSS 9.8 · fixed in 3.2.1", followed by the item's
+// text, is muted and kept to a paragraph of its own. Without a colour
+// theme the badge is "[ACT]" and the like. styled turns text into a
+// placeholder shown in a style.
+func tagLine(line, next, theme string, head bool, styled func(string, *lipgloss.Style) string) string {
+	lead, imp, rest, ok := brief.SplitTag(line)
+	if !ok {
+		return line
+	}
+	plain := lipgloss.NewStyle()
+	badge, facts := " "+imp.Label()+" ", &mutedStyle
+	switch {
+	case theme != themeDark && theme != themeLight:
+		badge, facts = "["+imp.Label()+"]", &plain
+	case imp == brief.ImpactAct:
+		badge = styled(badge, &actBadge)
+	case imp == brief.ImpactWatch:
+		badge = styled(badge, &watchBadge)
+	default:
+		badge = styled(badge, &fyiBadge)
+	}
+	rest = strings.TrimSpace(rest)
+	if head || lead != "" || !strings.Contains(rest, " · ") || strings.ContainsAny(rest, "[]<>`*_") || strings.Contains(rest, "://") || strings.TrimSpace(next) == "" {
+		return lead + badge + " " + rest
+	}
+	// Muted facts, a placeholder per word or few, so they still wrap.
+	var toks []string
+	chunk := ""
+	for _, w := range strings.Fields(rest) {
+		if chunk != "" {
+			chunk += " "
+		}
+		if chunk += w; lipgloss.Width(chunk) >= 7 {
+			toks, chunk = append(toks, styled(chunk, facts)), ""
+		}
+	}
+	if chunk != "" {
+		toks = append(toks, styled(chunk, facts))
+	}
+	return badge + " " + strings.Join(toks, " ") + "\n"
 }
 
 // extractQuotes replaces each blockquote paragraph with a placeholder

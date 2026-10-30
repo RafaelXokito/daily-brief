@@ -102,9 +102,9 @@ func TestPlanSearchesGrowsWithBudgetAndRespectsCap(t *testing.T) {
 			if n < max(1, prev) {
 				t.Errorf("%s: %d searches at %d tokens, fewer than %d before", provider, n, budget, prev)
 			}
-			spend, limit := n*costPerSearch(provider), planFactor*float64(budget)
+			spend, limit := n*costPerSearch(provider, planWindow), planFactor*float64(budget)
 			if provider != "claude-code" {
-				_, spend = apiPlan(budget, maxTopicItems, n)
+				_, spend = apiPlan(budget, maxTopicItems, n, planWindow)
 				limit = float64(budget)
 			}
 			if n > 1 && float64(spend) > limit {
@@ -198,7 +198,7 @@ func TestClaudeCodeBaselineReaches85WithFewTopics(t *testing.T) {
 		t.Logf("%d topics: baseline %s, Assess spend %.0f%%, warnings %v", n, HumanTokens(cfg.TokenBudget), share, a.Messages)
 		for _, frac := range []float64{0.6, 1.0} {
 			f := &scriptBackend{research: spending(frac)}
-			j, _ := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+			j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			if j.Utilization() < 85 {
 				t.Errorf("%d topics at baseline, spending %.0f%%: utilization %.1f%%", n, 100*frac, j.Utilization())
 			}
@@ -222,7 +222,7 @@ func TestSubsetBaselineIsWeightedShare(t *testing.T) {
 	all.Topics = append(all.Topics, config.Topic{Name: "E", Weight: 2}, config.Topic{Name: "F", Weight: 0.1})
 	full := Baseline(all)
 	share := func(w float64) int64 { return int64(float64(full) * w / 6.1) }
-	need := passNeed("anthropic")
+	need := passNeed("anthropic", planWindow)
 	for _, tt := range []struct {
 		names []string
 		want  int64

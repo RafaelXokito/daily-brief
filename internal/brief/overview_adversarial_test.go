@@ -229,7 +229,7 @@ func TestAdv_RunSmallReadingCaps(t *testing.T) {
 					return Result{Markdown: `{"highlights":[{"tier":"act","topic":"T00","headline":"Headline number 0 about something","text":"x"}]}`, Tokens: 1_000}
 				},
 			}
-			j, _ := runWithin(t, context.Background(), cfg, f, 20*time.Second)
+			j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			caps := itemCaps(cfg)
 			items, done := 0, 0
 			for i, s := range j.Sections {

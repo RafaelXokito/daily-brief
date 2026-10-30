@@ -18,10 +18,15 @@ const (
 	planFactor = 0.85
 	// Context a pass's first request is planned with: system prompt, task
 	// prompt with a full history block (see LoadHistory, about 0.8k by
-	// estimateTokens) and the search tool, about 5.6k for the default
-	// topics. A top-up's prior digest may add more: need sizes a pass by
-	// the window it really sends.
+	// estimateTokens) and the search tool, about 5.8k for the default
+	// topics. A reader profile and mute list add their own size (see
+	// planWindowFor), and a top-up's prior digest may add more: need sizes
+	// a pass by the window it really sends.
 	planWindow = 6_000
+	// ccSearchCost is a claude-code search's cost end to end: Claude
+	// Code's WebSearch runs its own model call over the results (measured
+	// ~45k per search).
+	ccSearchCost = 45_000
 	// Tokens one search's results are planned to add, the middle of the
 	// usual 10-30k, and what a search request is planned to write.
 	typicalResult = 20_000
@@ -64,18 +69,23 @@ const (
 	costWarnUSD = 8
 )
 
+// planWindowFor is the context a pass of cfg is planned with: planWindow
+// plus what the reader profile and mute list add to every request.
+func planWindowFor(cfg config.Config) int64 {
+	return planWindow + readerTokens(cfg.Profile, cfg.Mute)
+}
+
 // costPerSearch is the rough end-to-end token cost of one web search,
-// including the results fed back to the model.
-func costPerSearch(provider string) int64 {
+// including the results fed back to the model, for passes planned with a
+// context of window.
+func costPerSearch(provider string, window int64) int64 {
 	if provider == "claude-code" {
-		// Claude Code's WebSearch runs its own model call over the results
-		// (measured ~45k per search end to end).
-		return 45_000
+		return ccSearchCost
 	}
 	// The first search of a pass reads the context twice and the results
 	// once, then writes the digest. Later searches in the same pass cost
 	// more, since the context grows by each search's results.
-	return 2*planWindow + typicalResult + typicalOut
+	return 2*window + typicalResult + typicalOut
 }
 
 func target(provider string) float64 {
@@ -95,20 +105,21 @@ func recommendedSearches(provider string) int64 {
 // passCost is the least budget worth starting a research or top-up pass
 // with. For claude-code that is one search plus writing the digest; the
 // API backend offers a search only when its worst case fits.
-func passCost(provider string) int64 {
+func passCost(provider string, window int64) int64 {
 	if provider == "claude-code" {
-		return costPerSearch(provider) + writeOverhead
+		return ccSearchCost + writeOverhead
 	}
-	return searchReserve(searchIterations, planWindow, initialResult, searchMaxTokens(maxTopicItems))
+	return searchReserve(searchIterations, window, initialResult, searchMaxTokens(maxTopicItems))
 }
 
 // apiPlan follows the API backend's search loop over a pass of budget,
-// making at most limit searches, with typical results: it returns how many
+// making at most limit searches, with typical results and a first context
+// of window: it returns how many
 // searches the loop's reservations allow and what they are expected to
 // spend. The context grows by each search's results and rewritten digest,
 // so each search costs more than the one before.
-func apiPlan(budget int64, items int, limit int64) (searches, spent int64) {
-	c, o := int64(planWindow), searchMaxTokens(items)
+func apiPlan(budget int64, items int, limit, window int64) (searches, spent int64) {
+	c, o := window, searchMaxTokens(items)
 	more := estimateTokens(continuePrompt(budget, limit))
 	for searches < min(limit, maxRequests) && searchReserve(searchIterations, c, initialResult, o) <= budget-spent {
 		spent += 2*c + typicalResult + typicalOut
@@ -121,14 +132,15 @@ func apiPlan(budget int64, items int, limit int64) (searches, spent int64) {
 // planSpend is what a pass of t is expected to spend and how many
 // searches it makes, by the plan its backend follows.
 func planSpend(provider string, t Task) (tokens, searches int64) {
-	write := min(t.Budget, planWindow+digestTokens(t.Items)) // a pass that only writes
+	window := planWindow + readerTokens(t.Profile, t.Mute)
+	write := min(t.Budget, window+digestTokens(t.Items)) // a pass that only writes
 	switch {
 	case t.Searches == 0:
 		return write, 0
 	case provider == "claude-code":
-		return min(t.Budget, t.Searches*costPerSearch(provider)+writeOverhead), t.Searches
+		return min(t.Budget, t.Searches*ccSearchCost+writeOverhead), t.Searches
 	}
-	if searches, spent := apiPlan(t.Budget, t.Items, t.Searches); searches > 0 {
+	if searches, spent := apiPlan(t.Budget, t.Items, t.Searches, window); searches > 0 {
 		return spent, searches
 	}
 	return write, 0
@@ -143,7 +155,7 @@ func margin(provider string, alloc int64, search bool) int64 {
 	}
 	m := alloc / 10
 	if search {
-		m += costPerSearch(provider)
+		m += ccSearchCost
 	}
 	return m
 }
@@ -155,14 +167,15 @@ func spendable(provider string, room int64, n int, search bool) int64 {
 		return room
 	}
 	if search {
-		room -= int64(n) * costPerSearch(provider)
+		room -= int64(n) * ccSearchCost
 	}
 	return room * 10 / 11
 }
 
-// passNeed is the least free budget a search pass can start with.
-func passNeed(provider string) int64 {
-	return passCost(provider) + margin(provider, passCost(provider), true)
+// passNeed is the least free budget a search pass, planned with a context
+// of window, can start with.
+func passNeed(provider string, window int64) int64 {
+	return passCost(provider, window) + margin(provider, passCost(provider, window), true)
 }
 
 func overviewReserve(budget int64) int64 {
@@ -179,9 +192,9 @@ func planSearches(cfg config.Config, budget int64) int64 {
 		limit = math.MaxInt64
 	}
 	if cfg.Provider.Type == "claude-code" {
-		return min(limit, max(1, int64(planFactor*float64(budget))/costPerSearch(cfg.Provider.Type)))
+		return min(limit, max(1, int64(planFactor*float64(budget))/ccSearchCost))
 	}
-	n, _ := apiPlan(budget, maxTopicItems, limit)
+	n, _ := apiPlan(budget, maxTopicItems, limit, planWindowFor(cfg))
 	return max(1, n)
 }
 
@@ -321,20 +334,20 @@ func Baseline(cfg config.Config) int64 {
 		b, _ := SubsetBaseline(cfg)
 		return b
 	}
-	p := cfg.Provider.Type
+	p, w := cfg.Provider.Type, planWindowFor(cfg)
 	var n int64
 	for _, c := range itemCaps(cfg) {
 		if c > 0 {
 			n++
 		}
 	}
-	perTopic := recommendedSearches(p)*costPerSearch(p) + writeOverhead
+	perTopic := recommendedSearches(p)*costPerSearch(p, w) + writeOverhead
 	base := n*perTopic + maxOverviewReserve
 	if p != "claude-code" {
-		floor := float64(unspendable()+maxOverviewReserve) / (1 - target(p))
-		base = max(base, n*passCost(p)+maxOverviewReserve, int64(floor))
+		floor := float64(unspendable(w)+maxOverviewReserve) / (1 - target(p))
+		base = max(base, n*passCost(p, w)+maxOverviewReserve, int64(floor))
 	}
-	for b := base; b <= 4*base; b += costPerSearch(p) {
+	for b := base; b <= 4*base; b += costPerSearch(p, w) {
 		cfg.TokenBudget = b
 		if run, _ := planRun(cfg); float64(run.TokensUsed()) >= target(p)*float64(b) {
 			return b
@@ -363,14 +376,15 @@ func SubsetBaseline(cfg config.Config) (subset, full int64) {
 	if total == 0 {
 		return full, full
 	}
-	return max(int64(float64(full)*share/total), n*passNeed(cfg.Provider.Type)+maxOverviewReserve), full
+	return max(int64(float64(full)*share/total), n*passNeed(cfg.Provider.Type, planWindowFor(cfg))+maxOverviewReserve), full
 }
 
-// unspendable is the most an API run may be left with once no further
-// search fits, after one large result has raised every later search's
-// reserve: just under a fresh search's reserve at largeResult.
-func unspendable() int64 {
-	return searchReserve(searchIterations, planWindow, largeResult, searchMaxTokens(maxTopicItems))
+// unspendable is the most an API run planned with a context of window may
+// be left with once no further search fits, after one large result has
+// raised every later search's reserve: just under a fresh search's reserve
+// at largeResult.
+func unspendable(window int64) int64 {
+	return searchReserve(searchIterations, window, largeResult, searchMaxTokens(maxTopicItems))
 }
 
 // ResolveBudget replaces an auto (0) token budget with the baseline and
@@ -446,7 +460,7 @@ type Assessment struct {
 // Assess estimates a run of cfg (whose budget must be resolved) and warns
 // about budgets that are too low or high. Warnings never block a run.
 func Assess(cfg config.Config) Assessment {
-	p := cfg.Provider.Type
+	p, w := cfg.Provider.Type, planWindowFor(cfg)
 	reserve, shares := split(cfg)
 	pool := cfg.TokenBudget - reserve
 	a := Assessment{Budget: cfg.TokenBudget, Baseline: Baseline(cfg), Reserve: reserve, Level: LevelOK, Subscription: p == "claude-code"}
@@ -480,9 +494,9 @@ func Assess(cfg config.Config) Assessment {
 		switch {
 		case caps[i] == 0:
 			unread = append(unread, t.Name)
-		case alloc < passCost(p) && even >= passCost(p):
+		case alloc < passCost(p, w) && even >= passCost(p, w):
 			weightThin = append(weightThin, t.Name)
-		case alloc < passCost(p):
+		case alloc < passCost(p, w):
 			budgetThin = true
 		}
 		tp := TopicPlan{Name: t.Name, Share: shares[i], Budget: shares[i]}
@@ -524,13 +538,13 @@ func Assess(cfg config.Config) Assessment {
 	} else if total < minTopicItems*len(cfg.Topics) {
 		a.Messages = append(a.Messages, fmt.Sprintf("max_read_minutes %d leaves room for only %d items across %d topics, so some topics get a single item", cfg.MaxReadMinutes, total, len(cfg.Topics)))
 	}
-	marginWarned := margin(p, passCost(p), true) > 0 && pool >= passNeed(p) && pool < 2*passNeed(p)
+	marginWarned := margin(p, passCost(p, w), true) > 0 && pool >= passNeed(p, w) && pool < 2*passNeed(p, w)
 	if marginWarned {
 		a.Messages = append(a.Messages, fmt.Sprintf("budget funds only one search pass beside %s's safety margin (one search plus 10%% per pass), so a run will likely spend under %.0f%% of it", p, 100*target(p)))
 	}
 	capped := false
 	if c := cfg.MaxSearchesPerTopic; c > 0 && active > 0 {
-		perPass := planSpendCapped(p, c) + writeOverhead
+		perPass := planSpendCapped(p, c, w) + writeOverhead
 		if most := int64(active) * (1 + int64(maxPasses(p))) * perPass; float64(most) < target(p)*float64(pool) {
 			capped = true
 			a.Messages = append(a.Messages, fmt.Sprintf("max_searches_per_topic %d limits each pass to about %s tokens, so most of this budget cannot be spent; set it to 0 (auto)", c, HumanTokens(perPass)))
@@ -540,7 +554,7 @@ func Assess(cfg config.Config) Assessment {
 	// each pass holds a safety margin, so the last of a budget may fund no
 	// further search. Say so rather than promise the target share.
 	if share := float64(a.Spend) / float64(a.Budget); !capped && !marginWarned && a.Level != LevelLow && share < target(p) {
-		why := fmt.Sprintf("each search must fit its worst case (about %s on a fresh pass), and what is left after the last one that fits stays unspent", HumanTokens(passCost(p)))
+		why := fmt.Sprintf("each search must fit its worst case (about %s on a fresh pass), and what is left after the last one that fits stays unspent", HumanTokens(passCost(p, w)))
 		if a.Subscription {
 			why = fmt.Sprintf("each pass holds back one search plus 10%% for overshoot, and what is left after the last pass that fits stays unspent (the %s baseline aims for %.0f%%)", HumanTokens(a.Baseline), 100*target(p))
 		}
@@ -555,12 +569,13 @@ func Assess(cfg config.Config) Assessment {
 	return a
 }
 
-// planSpendCapped is what one pass of at most c searches spends at most.
-func planSpendCapped(provider string, c int64) int64 {
+// planSpendCapped is what one pass of at most c searches, planned with a
+// context of window, spends at most.
+func planSpendCapped(provider string, c, window int64) int64 {
 	if provider == "claude-code" {
-		return c * costPerSearch(provider)
+		return c * ccSearchCost
 	}
-	_, spent := apiPlan(math.MaxInt64/4, maxTopicItems, c)
+	_, spent := apiPlan(math.MaxInt64/4, maxTopicItems, c, window)
 	return spent
 }
 

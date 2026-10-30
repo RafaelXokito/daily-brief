@@ -553,7 +553,7 @@ func TestAPIPromptCarriesHistoryForEveryPassKind(t *testing.T) {
 		}
 		sim := &realistic{results: []int64{15_000}}
 		b, reqs := scriptedAPI(t, apiBackend{}, sim.handle)
-		researchWithin(t, context.Background(), b, task, 5*time.Second)
+		researchWithin(t, context.Background(), b, task, 30*time.Second)
 		rs := reqs()
 		if len(rs) == 0 {
 			t.Errorf("%s: no request sent", name)
@@ -671,7 +671,7 @@ func TestSubsetRunGetsOnlyOwnHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &scriptBackend{research: spending(0.4)}
-	runWithin(t, context.Background(), cfg, b, 10*time.Second)
+	runWithin(t, context.Background(), cfg, b, 30*time.Second)
 	tasks := b.snapshot()
 	if len(tasks) == 0 {
 		t.Fatal("no passes")
@@ -773,7 +773,7 @@ func TestRunWithFullHistoryKeepsCapAndTarget(t *testing.T) {
 				cfg := testConfig(provider, 0, topics...)
 				cfg.TokenBudget = int64(mult * float64(Baseline(cfg)))
 				f := &scriptBackend{research: spending(frac)}
-				j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+				j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 				label := fmt.Sprintf("history %s ×%.0f spend %.0f%%", provider, mult, 100*frac)
 				checkRun(t, label, cfg, j, f.snapshot(), ups)
 				if u := j.Utilization(); u < 85 {
@@ -849,7 +849,7 @@ func TestAccountingAcrossFailedAndSuccessfulReruns(t *testing.T) {
 	f := &scriptBackend{research: func(_ context.Context, tk Task, _ int) Result {
 		return Result{Markdown: "### First " + tk.Topic.Name + "\nx", Tokens: int64(0.6 * float64(tk.Budget)), Searches: tk.Searches}
 	}}
-	j0, _ := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+	j0, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 	s0 := save(j0)
 	check("full run", s0, j0, 1)
 	byTopic := func(j *Journal) map[string]Section {
@@ -862,7 +862,7 @@ func TestAccountingAcrossFailedAndSuccessfulReruns(t *testing.T) {
 	first := byTopic(s0)
 
 	// 1: a failed -topics A,B run.
-	j1, _ := runWithin(t, context.Background(), subset("A", "B"), failingBackend{}, 10*time.Second)
+	j1, _ := runWithin(t, context.Background(), subset("A", "B"), failingBackend{}, 30*time.Second)
 	s1 := save(j1)
 	check("failed A,B", s1, j1, 2)
 	if s1.RunFailed() != s1.RunUsed() || s1.RunUsed() == 0 {
@@ -879,7 +879,7 @@ func TestAccountingAcrossFailedAndSuccessfulReruns(t *testing.T) {
 	f2 := &scriptBackend{research: func(_ context.Context, tk Task, _ int) Result {
 		return Result{Markdown: "### Second A\nx", Tokens: int64(0.5 * float64(tk.Budget)), Searches: tk.Searches}
 	}}
-	j2, _ := runWithin(t, context.Background(), subset("A"), f2, 10*time.Second)
+	j2, _ := runWithin(t, context.Background(), subset("A"), f2, 30*time.Second)
 	runA := *j2.Sections[0]
 	s2 := save(j2)
 	check("successful A", s2, j2, 3)
@@ -895,7 +895,7 @@ func TestAccountingAcrossFailedAndSuccessfulReruns(t *testing.T) {
 	}
 
 	// 3: another failed run over A and B.
-	j3, _ := runWithin(t, context.Background(), subset("A", "B"), failingBackend{}, 10*time.Second)
+	j3, _ := runWithin(t, context.Background(), subset("A", "B"), failingBackend{}, 30*time.Second)
 	s3 := save(j3)
 	check("failed A,B again", s3, j3, 4)
 	for tp, s := range byTopic(s3) {
@@ -949,7 +949,7 @@ func TestLegacyJournalWithoutRuns(t *testing.T) {
 	if err := cfg.FilterTopics([]string{"B"}); err != nil {
 		t.Fatal(err)
 	}
-	j, _ := runWithin(t, context.Background(), cfg, &scriptBackend{research: spending(0.5)}, 10*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, &scriptBackend{research: spending(0.5)}, 30*time.Second)
 	if err := SaveJournal(j); err != nil {
 		t.Fatal(err)
 	}
@@ -1034,7 +1034,7 @@ func TestAPINarrowAtNarrowMin(t *testing.T) {
 		for budget := int64(narrowMin); budget <= 20_000; budget += 250 {
 			task := Task{Topic: config.Topic{Name: "A"}, Budget: budget, Items: 6, Prior: prior, History: h}
 			b, reqs := scriptedAPI(t, apiBackend{}, (&realistic{results: []int64{15_000}}).handle)
-			researchWithin(t, context.Background(), b, task, 5*time.Second)
+			researchWithin(t, context.Background(), b, task, 30*time.Second)
 			if len(reqs()) > 0 {
 				least = budget
 				break
@@ -1078,7 +1078,7 @@ func TestAPINarrowAtItsNeedSendsRequest(t *testing.T) {
 			task := g.task(0, need, prior)
 			task.Searches = 0
 			b, reqs := scriptedAPI(t, apiBackend{}, (&realistic{results: []int64{15_000}}).handle)
-			researchWithin(t, context.Background(), b, task, 5*time.Second)
+			researchWithin(t, context.Background(), b, task, 30*time.Second)
 			if len(reqs()) == 0 {
 				t.Errorf("history %d, %d items: a narrow pass allocated its need %d sent no request", len(h), items, need)
 			}

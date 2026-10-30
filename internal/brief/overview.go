@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/net/idna"
+
+	"github.com/rafaelpereira/daily-brief/internal/config"
 )
 
 var (
@@ -44,19 +46,8 @@ func isUnsafe(r rune) bool { return isControl(r) || IsInvisible(r) }
 
 // IsInvisible reports whether r is a bidirectional control, which can
 // make text read differently from what it is, or a zero-width space or
-// word joiner, which can hide in it. The zero-width joiner, which emoji
-// sequences need, is not one.
-func IsInvisible(r rune) bool {
-	switch {
-	case r >= '\u202A' && r <= '\u202E', r >= '\u2066' && r <= '\u2069':
-		return true
-	}
-	switch r {
-	case '\u200E', '\u200F', '\u061C', '\u200B', '\u2060':
-		return true
-	}
-	return false
-}
+// word joiner, which can hide in it (see config.IsInvisible).
+func IsInvisible(r rune) bool { return config.IsInvisible(r) }
 
 // SafeWebURL is raw as a normalised http(s) URL with a host, or false:
 // the only links shown as hyperlinks or handed to the system's opener. A
@@ -119,6 +110,10 @@ type Item struct {
 	// else a bare URL in it, if that is an http(s) URL (see SafeWebURL).
 	URL      string
 	Markdown string
+	// Impact is the item's tag, FYI if it has none; Tagged reports whether
+	// it has one.
+	Impact Impact
+	Tagged bool
 }
 
 // Items lists the section's items in order.
@@ -130,7 +125,8 @@ func (s *Section) Items() []Item {
 			if !ok {
 				u, _ = SafeWebURL(strings.TrimRight(bareURLRE.FindString(b.text), ".,;:!?'\""))
 			}
-			items = append(items, Item{Headline: fullHeadline(b.text), URL: u, Markdown: b.text})
+			imp, tagged := itemImpact(b.text)
+			items = append(items, Item{Headline: fullHeadline(b.text), URL: u, Markdown: b.text, Impact: imp, Tagged: tagged})
 		}
 	}
 	return items
@@ -150,7 +146,7 @@ func MatchHeadline(a, b string) bool {
 // ItemLines are the lines of the section's Markdown that start its
 // items, in the order Items lists them.
 func (s *Section) ItemLines() []int {
-	lead := strings.Count(s.Markdown[:len(s.Markdown)-len(strings.TrimLeftFunc(s.Markdown, unicode.IsSpace))], "\n")
+	lead := leadingLines(s.Markdown)
 	var lines []int
 	for _, b := range splitDigest(s.Markdown) {
 		if b.item {
@@ -158,6 +154,12 @@ func (s *Section) ItemLines() []int {
 		}
 	}
 	return lines
+}
+
+// leadingLines is how many lines the blank start of md takes: what
+// splitDigest's line numbers are offset by in md.
+func leadingLines(md string) int {
+	return strings.Count(md[:len(md)-len(strings.TrimLeftFunc(md, unicode.IsSpace))], "\n")
 }
 
 // Headline is the headline of an item whose first line is line (see
@@ -180,10 +182,15 @@ func ItemIndex(items []Item, headline string) int {
 
 // PlainText is an item's Markdown as plain text: without heading or bold
 // markers, code ticks or the source links that end its lines; other links
-// keep their text.
+// keep their text. Its impact tag reads "[ACT]" and the like.
 func PlainText(md string) string {
+	md = strings.TrimSpace(md)
+	k, imp, tagged := itemTag(md)
 	var out []string
-	for _, l := range strings.Split(strings.TrimSpace(md), "\n") {
+	for i, l := range strings.Split(md, "\n") {
+		if tagged && i == k {
+			l = strings.Replace(l, "`"+imp.Label()+"`", "["+imp.Label()+"]", 1)
+		}
 		l = strings.TrimSpace(l)
 		if isHeading(l) {
 			l = strings.TrimSpace(strings.TrimLeft(l, "#"))
@@ -218,18 +225,43 @@ func Domain(raw string) string {
 // IsRelated reports whether a digest line is a Related label.
 func IsRelated(l string) bool { return isRelated(l) }
 
-// NumbersLine sums up the finished sections: "12 items · 2 updates ·
-// 5 topics · ~7 min", with minutes the journal's reading time.
+// NumbersLine sums up the finished sections: "12 items · 2 to act ·
+// 2 updates · 5 topics · ~7 min", with minutes the journal's reading time.
+// Items to act on are those tagged ACT; journals written before items
+// were tagged leave that count out.
 func NumbersLine(sections []*Section, minutes float64) string {
-	items, updates, topics := 0, 0, 0
+	items, act, updates, topics := 0, 0, 0, 0
+	tagged := false
 	for _, s := range sections {
 		if s.Status == StatusDone {
-			items += countItems(s.Markdown)
+			for _, it := range s.Items() {
+				items++
+				tagged = tagged || it.Tagged
+				if it.Tagged && it.Impact == ImpactAct {
+					act++
+				}
+			}
 			updates += s.Updates()
 			topics++
 		}
 	}
-	return fmt.Sprintf("%s · %s · %s · ~%.0f min", plural(items, "item"), plural(updates, "update"), plural(topics, "topic"), max(1, minutes))
+	parts := []string{plural(items, "item")}
+	if tagged {
+		parts = append(parts, fmt.Sprintf("%d to act", act))
+	}
+	parts = append(parts, plural(updates, "update"), plural(topics, "topic"), fmt.Sprintf("~%.0f min", max(1, minutes)))
+	return strings.Join(parts, " · ")
+}
+
+// ActCount is how many of the section's items are tagged ACT.
+func (s *Section) ActCount() int {
+	n := 0
+	for _, it := range s.Items() {
+		if it.Tagged && it.Impact == ImpactAct {
+			n++
+		}
+	}
+	return n
 }
 
 // StatusLines say how each topic fared: "Security — 3 items, 1 update",
@@ -334,7 +366,9 @@ func looksLikeJSON(reply string) bool {
 
 // resolveHighlights keeps the highlights that name an item of a finished
 // section, once each, with that section's topic and item's headline as
-// written, "act" first and at most maxHighlights. Their text and why are
+// written, "act" first and at most maxHighlights. A tagged item's
+// highlight is "act" if and only if the item is tagged ACT; an untagged
+// one keeps the tier the model chose. Their text and why are
 // cleaned (see CleanText) and trimmed.
 func resolveHighlights(in []Highlight, sections []*Section) []Highlight {
 	var out []Highlight
@@ -353,12 +387,16 @@ func resolveHighlights(in []Highlight, sections []*Section) []Highlight {
 		}
 		seen[sections[k].Topic+"\x00"+items[n].Headline] = true
 		h.Topic, h.Headline = sections[k].Topic, items[n].Headline
-		if strings.EqualFold(strings.TrimSpace(h.Tier), TierAct) {
-			h.Tier = TierAct
-		} else {
-			h.Tier = TierKnow
+		act := strings.EqualFold(strings.TrimSpace(h.Tier), TierAct)
+		if items[n].Tagged {
+			// The item's tag decides: "act" is for items tagged ACT.
+			act = items[n].Impact == ImpactAct
 		}
-		h.Text = clip(firstWords(CleanText(h.Text), highlightWords), highlightRunes)
+		h.Tier = TierKnow
+		if act {
+			h.Tier = TierAct
+		}
+		h.Text = clip(firstWords(CleanText(stripTag(StripControl(h.Text))), highlightWords), highlightRunes)
 		if h.Text == "" {
 			h.Text = clip(firstWords(CleanText(h.Headline), highlightWords), highlightRunes)
 		}

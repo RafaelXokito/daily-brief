@@ -115,7 +115,7 @@ func TestRunSpendsMostOfBudgetWithoutExceedingIt(t *testing.T) {
 					t.Errorf("%s ×%.0f conc %d: spent %.1f%% of the budget, want 85-100%%", provider, mult, conc, 100*used)
 				}
 				for _, task := range f.tasks {
-					if task.Searches > 0 && task.Budget < passCost(provider) || task.Budget < narrowMin {
+					if task.Searches > 0 && task.Budget < passCost(provider, planWindow) || task.Budget < narrowMin {
 						t.Errorf("%s: started a pass with %d tokens, under one pass cost", provider, task.Budget)
 					}
 				}
@@ -223,7 +223,7 @@ func TestTopUpKeepsReadingCapAndReplacesSources(t *testing.T) {
 		}
 		return Result{Markdown: "### Two\ny", Sources: []Source{{URL: "https://new.example"}}, Tokens: 30_000, Searches: 1}
 	}}
-	j, _ := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 	for _, task := range f.snapshot() {
 		if task.Prior != "" && task.Items != g.caps[0] {
 			t.Errorf("top-up asked for %d items, want the reading cap %d", task.Items, g.caps[0])

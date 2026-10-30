@@ -116,7 +116,7 @@ func TestRenderWarningsKeepTheirBar(t *testing.T) {
 	m.journal.Overview.Highlights = nil
 	m.refresh()
 	for width := 30; width <= 120; width += 7 {
-		md, _ := m.markdown()
+		md, _, _ := m.markdown()
 		out := Render(md, width, "dark")
 		checkRendered(t, "warnings", out, width)
 		plain := ansi.Strip(out)

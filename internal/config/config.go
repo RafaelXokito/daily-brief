@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -81,9 +83,14 @@ type Config struct {
 	// terminal's background), dark or light.
 	Theme string `yaml:"theme"`
 	// Location biases search results (e.g. "Lisbon, Portugal"). Optional.
-	Country string  `yaml:"country,omitempty"`
-	City    string  `yaml:"city,omitempty"`
-	Topics  []Topic `yaml:"topics"`
+	Country string `yaml:"country,omitempty"`
+	City    string `yaml:"city,omitempty"`
+	// Profile describes the reader, such as their stack or investments, so
+	// research passes rank and explain items for them. Optional.
+	Profile string `yaml:"profile,omitempty"`
+	// Mute lists subjects or keywords research passes leave out. Optional.
+	Mute   []string `yaml:"mute,omitempty"`
+	Topics []Topic  `yaml:"topics"`
 	// AllTopics are the configured topics when FilterTopics kept only
 	// some of them; a run over the subset is merged with the rest.
 	AllTopics []Topic `yaml:"-"`
@@ -144,6 +151,7 @@ func Load(path string) (cfg Config, created bool, err error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, false, fmt.Errorf("parse %s: %w", path, err)
 	}
+	cfg.Clean()
 	return cfg, false, cfg.Validate()
 }
 
@@ -167,12 +175,72 @@ func Save(path string, cfg Config) error {
 		"#               new development, then shown as an update; 0 = off.\n" +
 		"# theme: auto (GLAMOUR_STYLE if set, else the terminal's background), dark or light.\n" +
 		"# price_*: USD prices used only to estimate the cost of API runs.\n" +
-		"# weight: optional per-topic multiplier for its share of the budget.\n"
+		"# weight: optional per-topic multiplier for its share of the budget.\n" +
+		"# profile: optional, about you (at most 500 characters): items that affect it rank higher and say how, e.g.\n" +
+		"#          profile: \"Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor\"\n" +
+		"# mute: optional subjects or keywords to leave out (at most 30, 80 characters each), e.g.\n" +
+		"#          mute: [crypto, celebrity tech gossip]\n"
 	return os.WriteFile(path, append([]byte(header), data...), 0o644)
 }
 
 // Topic weights may differ by at most this ratio.
 const maxWeightRatio = 1000
+
+// Limits of the reader profile and mute list, in characters.
+const (
+	MaxProfileChars = 500
+	MaxMuteEntries  = 30
+	MaxMuteChars    = 80
+)
+
+// Clean strips control and invisible characters (see IsInvisible) from
+// the profile and mute list, as brief.StripControl does from what the
+// model writes, puts each on one line and drops empty mute entries. The
+// joiners emoji and some scripts need stay.
+func (c *Config) Clean() {
+	c.Profile = cleanText(c.Profile)
+	var mute []string
+	for _, m := range c.Mute {
+		if m = cleanText(m); m != "" {
+			mute = append(mute, m)
+		}
+	}
+	c.Mute = mute
+}
+
+func cleanText(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case IsInvisible(r):
+			return -1
+		case unicode.IsControl(r):
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if strings.Trim(s, "\u200c\u200d") == "" {
+		// Joiners alone show nothing.
+		return ""
+	}
+	return s
+}
+
+// IsInvisible reports whether r is a bidirectional control, which can
+// make text read differently from what it is, or a zero-width space or
+// word joiner, which can hide in it. The zero-width joiner and non-joiner,
+// which emoji sequences and some scripts need, are not.
+func IsInvisible(r rune) bool {
+	switch {
+	case r >= '\u202A' && r <= '\u202E', r >= '\u2066' && r <= '\u2069':
+		return true
+	}
+	switch r {
+	case '\u200E', '\u200F', '\u061C', '\u200B', '\u2060':
+		return true
+	}
+	return false
+}
 
 func (c Config) Validate() error {
 	if len(c.Topics) == 0 {
@@ -231,6 +299,17 @@ func (c Config) Validate() error {
 	}
 	if c.Concurrency < 1 {
 		return errors.New("config: concurrency must be at least 1")
+	}
+	if n := utf8.RuneCountInString(c.Profile); n > MaxProfileChars {
+		return fmt.Errorf("config: profile is %d characters; keep it to %d", n, MaxProfileChars)
+	}
+	if len(c.Mute) > MaxMuteEntries {
+		return fmt.Errorf("config: mute has %d entries; keep it to %d", len(c.Mute), MaxMuteEntries)
+	}
+	for _, m := range c.Mute {
+		if utf8.RuneCountInString(m) > MaxMuteChars {
+			return fmt.Errorf("config: mute entry %q is longer than %d characters", m, MaxMuteChars)
+		}
 	}
 	return nil
 }

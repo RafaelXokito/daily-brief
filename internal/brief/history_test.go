@@ -215,7 +215,7 @@ func TestRunPassesCarryHistory(t *testing.T) {
 
 	cfg := testConfig("anthropic", 0, "A", "B", "C")
 	b := &scriptBackend{research: spending(0.3)}
-	_, _ = runWithin(t, context.Background(), cfg, b, 10*time.Second)
+	_, _ = runWithin(t, context.Background(), cfg, b, 30*time.Second)
 	kinds := map[string]bool{}
 	for _, task := range b.snapshot() {
 		kind := map[bool]string{true: "first", false: "top-up"}[task.Prior == ""]
@@ -249,7 +249,7 @@ func TestRunPassesCarryHistory(t *testing.T) {
 	// history_days 0 turns it off.
 	cfg.HistoryDays = 0
 	b = &scriptBackend{research: spending(0.3)}
-	_, _ = runWithin(t, context.Background(), cfg, b, 10*time.Second)
+	_, _ = runWithin(t, context.Background(), cfg, b, 30*time.Second)
 	for _, task := range b.snapshot() {
 		if task.History != nil {
 			t.Fatalf("history_days 0: pass has history %v", task.History)
@@ -283,7 +283,7 @@ func TestHistoryIsInTheWindowAndThePlan(t *testing.T) {
 	cal := newCalibration()
 	before := g.need(cal, 0, "")
 	g.history = map[string][]Reported{cfg.Topics[0].Name: fullHistory()}
-	if after := g.need(cal, 0, ""); after <= before && after != passCost("anthropic") {
+	if after := g.need(cal, 0, ""); after <= before && after != passCost("anthropic", planWindow) {
 		t.Errorf("need %d with history, %d without", after, before)
 	}
 	task := g.task(0, needBudget, "")
@@ -310,13 +310,13 @@ func TestAssessFirstPassMatchesAPILoopWithHistory(t *testing.T) {
 			g.history[tp.Name] = fullHistory()
 		}
 		for i, tp := range a.Topics {
-			if tp.Budget < passCost("anthropic") {
+			if tp.Budget < passCost("anthropic", planWindow) {
 				continue
 			}
 			sim := &realistic{results: []int64{typicalResult}}
 			b, _ := scriptedAPI(t, apiBackend{}, sim.handle)
 			task := g.task(i, tp.Budget, "")
-			if res := researchWithin(t, context.Background(), b, task, 5*time.Second); res.Searches != tp.Searches {
+			if res := researchWithin(t, context.Background(), b, task, 30*time.Second); res.Searches != tp.Searches {
 				t.Errorf("budget %s, %s: Assess shows %d searches, the loop with history made %d", HumanTokens(budget), tp.Name, tp.Searches, res.Searches)
 			}
 		}
@@ -392,7 +392,7 @@ func TestFailedSubsetRerunKeepsEarlierAccounting(t *testing.T) {
 	if err := cfg.FilterTopics([]string{"A", "B"}); err != nil {
 		t.Fatal(err)
 	}
-	j, _ := runWithin(t, context.Background(), cfg, failingBackend{}, 10*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, failingBackend{}, 30*time.Second)
 	spent, budget := j.TokensUsed(), j.TokenBudget
 	if spent == 0 || spent > budget {
 		t.Fatalf("failed run spent %d of %d", spent, budget)

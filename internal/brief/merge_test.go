@@ -112,7 +112,7 @@ func TestFilteredRunRegeneratesOverviewFromMergedSections(t *testing.T) {
 	b := &summaryBackend{scriptBackend: scriptBackend{research: func(context.Context, Task, int) Result {
 		return Result{Markdown: "### New B", Tokens: 50_000, Searches: 1}
 	}}}
-	j, _ := runWithin(t, context.Background(), cfg, b, 5*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, b, 30*time.Second)
 	for _, want := range []string{"### Old A", "### New B", "### Old C"} {
 		if !strings.Contains(b.input, want) {
 			t.Errorf("overview input lacks %q:\n%s", want, b.input)

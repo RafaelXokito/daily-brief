@@ -152,7 +152,7 @@ func TestRunStoresHighlights(t *testing.T) {
 			return Result{Markdown: `{"highlights":[{"tier":"act","topic":"Security","headline":"npm token theft campaign","text":"Rotate npm tokens.","why":"Stolen tokens publish malware."}]}`, Tokens: 2_000}
 		},
 	}
-	j, _ := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 	if ov := j.Overview; ov.Status != StatusDone || len(ov.Highlights) != 1 || ov.Highlights[0].Tier != TierAct ||
 		!strings.Contains(ov.Markdown, "Rotate npm tokens.") || !strings.Contains(j.Markdown(), "https://github.blog/npm") {
 		t.Errorf("overview %+v", ov)

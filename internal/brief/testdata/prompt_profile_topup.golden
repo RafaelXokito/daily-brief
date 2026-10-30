@@ -1,0 +1,27 @@
+Today is {{TODAY}}.
+
+Topic: Security
+What I care about: Critical CVEs.
+
+You have about 300.0k tokens for this. Use web search to find the most consequential news.
+Write at most 6 items and at most 270 words in total.
+
+<reader_profile>
+Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor
+</reader_profile>
+Where an item affects this reader's stack or holdings, say so in why it matters (e.g. "affects your Quarkus 3.x apps") and rank it higher; it may be tagged `ACT`.
+
+Do not include items mainly about:
+<muted>
+- crypto
+- celebrity tech gossip
+</muted>
+
+This digest was written earlier today:
+
+<digest>
+### Old item
+Something happened. [source](https://a.example/x)
+</digest>
+
+Search for consequential items it missed. If the topic itself was quiet, widen to adjacent areas with notable news and put those items after a line "**Related**". Then reply with the full revised digest within the limits above, dropping weaker items to make room for stronger ones. If you find nothing better, return it unchanged.

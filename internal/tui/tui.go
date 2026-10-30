@@ -49,6 +49,15 @@ var (
 	statusStyle = lipgloss.NewStyle().Foreground(muted).Italic(true)
 )
 
+// Impact tag badges: ACT urgent, WATCH amber, FYI muted.
+var (
+	watchColor = lipgloss.AdaptiveColor{Light: "#9A6700", Dark: "#E3B341"}
+	badgeText  = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#1A1A1A"}
+	actBadge   = lipgloss.NewStyle().Bold(true).Foreground(badgeText).Background(errColor)
+	watchBadge = lipgloss.NewStyle().Bold(true).Foreground(badgeText).Background(watchColor)
+	fyiBadge   = lipgloss.NewStyle().Foreground(muted)
+)
+
 // pane is the pane that the arrow keys act on.
 type pane int
 
@@ -516,14 +525,14 @@ func (m *Model) refresh() {
 		m.showCursor()
 		return
 	}
-	md, heads := m.markdown()
+	md, heads, tags := m.markdown()
 	m.hlLines = nil
 	lines := make([]int, len(heads))
 	for i, h := range heads {
 		lines[i] = h.line
 	}
 	var starts []int
-	m.content, starts = renderItems(md, m.viewport.Width, m.theme, lines)
+	m.content, starts = renderItems(md, m.viewport.Width, m.theme, lines, tags)
 	if len(starts) == len(heads) {
 		for i := range heads {
 			heads[i].line = starts[i]
@@ -551,9 +560,10 @@ func (m *Model) itemLine(k int) int {
 	return -1
 }
 
-// markdown is what the summary pane shows of the selected section, and
-// the lines of it that start a topic's items and other headings.
-func (m *Model) markdown() (string, []heading) {
+// markdown is what the summary pane shows of the selected section, the
+// lines of it that start a topic's items and other headings, and those
+// that hold its items' tags (see brief.TagLines).
+func (m *Model) markdown() (string, []heading, map[int]bool) {
 	s := m.current()
 	var md, head string
 	switch {
@@ -569,9 +579,13 @@ func (m *Model) markdown() (string, []heading) {
 		head = "## " + s.Topic + "\n\n"
 	}
 	var heads []heading
+	tags := map[int]bool{}
 	if md == "" {
 		md = head + s.Render()
 		off, items := strings.Count(head, "\n"), s.ItemLines()
+		for l, h := range brief.TagLines(s.Markdown) {
+			tags[off+l] = h
+		}
 		for i, l := range strings.Split(s.Markdown, "\n") {
 			t := strings.TrimSpace(l)
 			switch k := slices.Index(items, i); {
@@ -591,7 +605,7 @@ func (m *Model) markdown() (string, []heading) {
 			md = strings.TrimSuffix(b.String(), ">\n") + "\n" + md
 		}
 	}
-	return md, heads
+	return md, heads, tags
 }
 
 // warnings are the run's overshoot and budget warnings, shown atop the
@@ -982,6 +996,11 @@ func (m *Model) sidebar() string {
 			icon = lipgloss.NewStyle().Foreground(errColor).Render("✗")
 		}
 		var counts []string
+		act := ""
+		if n := s.ActCount(); n > 0 && i > 0 {
+			act = fmt.Sprintf("!%d", n)
+			counts = append(counts, act)
+		}
 		if n := s.Updates(); n > 0 {
 			counts = append(counts, fmt.Sprintf("↻%d", n))
 		}
@@ -989,8 +1008,9 @@ func (m *Model) sidebar() string {
 			counts = append(counts, brief.HumanTokens(s.TokensUsed))
 		}
 		count := strings.Join(counts, " ")
-		// The row is "▸ ✓ name  ↻N 12.3k" within the box's sidebarWidth-1
-		// cells, with at least one space before the counts.
+		// The row is "▸ ✓ name  !A ↻N 12.3k" within the box's
+		// sidebarWidth-1 cells, with at least one space before the counts:
+		// A items to act on, N updates.
 		room := sidebarWidth - 1 - 2 - lipgloss.Width(icon) - 1 - 1 - lipgloss.Width(count)
 		name := truncate(brief.StripControl(s.Topic), room)
 		line := "  " + icon + " " + name
@@ -1001,7 +1021,11 @@ func (m *Model) sidebar() string {
 			line = mutedStyle.Render("▸ ") + icon + " " + lipgloss.NewStyle().Bold(true).Render(name)
 		}
 		pad := max(1, sidebarWidth-1-lipgloss.Width(line)-lipgloss.Width(count))
-		b.WriteString(line + strings.Repeat(" ", pad) + mutedStyle.Render(count) + "\n")
+		shown := mutedStyle.Render(count)
+		if act != "" {
+			shown = actStyle.Render(act) + mutedStyle.Render(strings.TrimPrefix(count, act))
+		}
+		b.WriteString(line + strings.Repeat(" ", pad) + shown + "\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }
@@ -1053,7 +1077,12 @@ func markUpdates(md string) string {
 	lines := strings.Split(md, "\n")
 	for i, l := range lines {
 		if lead, headline, ok := brief.SplitUpdate(l); ok {
-			lines[i] = lead + "↻ Update · " + headline
+			// A tag stays first, where it shows as a badge.
+			tag := ""
+			if _, imp, rest, ok := brief.SplitTag(headline); ok {
+				tag, headline = "`"+imp.Label()+"` ", rest
+			}
+			lines[i] = lead + tag + "↻ Update · " + headline
 		}
 	}
 	return strings.Join(lines, "\n")

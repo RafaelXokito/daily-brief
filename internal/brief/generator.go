@@ -19,15 +19,15 @@ const researchSystemPrompt = `You are the editor of a short personal morning bri
 For the topic you are given, use web search to find what actually happened recently and write a compact, skimmable digest.
 
 Guidelines:
-- Cover only news from the last few days. Rank items by importance, most consequential first.
-- Stay within the item and word limits you are given. Fewer items is fine; never pad with stale, evergreen or marketing content.
+- Cover only news from the last few days. Tag each item ` + "`ACT`" + ` (act today: patch, upgrade, rotate credentials, a deadline), ` + "`WATCH`" + ` (likely to matter soon) or ` + "`FYI`" + ` (worth knowing). Put ACT items first, then WATCH, then FYI, each most consequential first.
+- Stay within the item and word limits you are given; tags and facts count toward them. Fewer items is fine; never pad with stale, evergreen or marketing content.
 - If the topic itself is quiet, widen to closely related areas that had notable news (e.g. if Java is quiet, other languages and frameworks with notable releases or problems). Put those items last, after a line "**Related**".
 - Strongly prefer primary sources: vendor advisories, release notes, official blogs, CISA/NVD, regulator or company announcements, then reputable news outlets. Avoid newsletter digests, directory sites and unofficial trackers; if only a secondary source exists, say so briefly in the item.
-- For security items, name the affected product and versions, severity/CVE if known, and the recommended action.
+- For security items, name the affected product and the recommended action, and put known facts tersely after the tag: CVE, CVSS, CISA KEV due date, fixed version, e.g. ` + "`ACT` CVE-2026-1234 · CVSS 9.8 · KEV due Nov 10 · fixed in 3.2.1" + `. For finance items, put the key figure or ticker there.
 - Do your research first and write nothing until you are done; your whole reply is the digest itself.
 
 Format (Markdown, no top-level heading, no preamble or closing remarks):
-- Each item: "### <headline>" then at most 2 tight sentences on why it matters, ending with an inline link to the best source like [source](https://...).
+- Each item: "### <headline>", then a line starting with its tag, exactly ` + "`ACT`, `WATCH` or `FYI`" + ` (uppercase, in backticks), then any facts, then at most 2 tight sentences on why it matters, ending with an inline link to the best source like [source](https://...).
 - If nothing notable happened, even in related areas, say so in one line.`
 
 const overviewSystemPrompt = `You pick the highlights of a personal morning briefing. You are given digests for several topics: each topic starts with a line "# <topic>", and each item with its headline, usually a line "### <headline>".
@@ -37,7 +37,7 @@ Reply with JSON only: no prose, no Markdown and no code fence. Use exactly this 
 
 Rules:
 - Pick 3-6 of the most important items across all topics, most important first. Use only items from the digests; never invent one.
-- tier is "act" for something to do: a security action such as patching, upgrading or rotating credentials, or a deadline. Otherwise tier is "know": worth knowing.
+- tier is "act" for something to do: a security action such as patching, upgrading or rotating credentials, or a deadline; items tagged ` + "`ACT`" + ` are, items tagged ` + "`WATCH` or `FYI`" + ` are not. Otherwise tier is "know": worth knowing.
 - topic is the topic name exactly as given after "# ". headline is the item's headline exactly as written, without "### ".
 - text says what happened in at most 18 words. why says why it matters to me in at most 14 words.
 - Prefer new stories over updates to earlier ones (items headed "Update:") unless an update is major.`
@@ -51,9 +51,11 @@ const historyInstruction = `These were already in my journal on the dates shown.
 	`Updates count toward the item limit and rank like any other item.`
 
 // taskPrompt is the user prompt for a research, top-up or narrow pass. With
+// a reader profile or mute list, it gives them (see readerBlocks); with
 // history, it lists what earlier days reported (see LoadHistory). Angle
 // brackets in a prior digest are neutralised, as in history lines, so it
-// cannot close its own tag.
+// cannot close its own tag. Without profile, mute list or history it is
+// the prompt it was before they existed.
 func taskPrompt(t Task) string {
 	prior := untag(t.Prior)
 	var b strings.Builder
@@ -65,6 +67,7 @@ func taskPrompt(t Task) string {
 		fmt.Fprintf(&b, "You have about %s tokens for this and no web searches.\n", HumanTokens(t.Budget))
 	}
 	fmt.Fprintf(&b, "Write at most %d items and at most %d words in total.", t.Items, t.Items*wordsPerItem)
+	b.WriteString(readerBlocks(t.Profile, t.Mute))
 	if len(t.History) > 0 {
 		b.WriteString("\n\n<previously_reported>\n")
 		for _, r := range t.History {
@@ -83,6 +86,71 @@ func taskPrompt(t Task) string {
 			"Reply with the full revised digest within the limits above.", prior)
 	}
 	return b.String()
+}
+
+const (
+	profileInstruction  = `Where an item affects this reader's stack or holdings, say so in why it matters (e.g. "affects your Quarkus 3.x apps") and rank it higher; it may be tagged ` + "`ACT`" + `.`
+	overviewProfileNote = `Where a highlight affects this reader's stack or holdings, say so in its why.`
+	overviewMuteNote    = `Do not pick highlights mainly about:`
+)
+
+// readerBlocks are what a pass's prompt says about the reader: a
+// <reader_profile> block and a <muted> list of subjects to leave out, each
+// only if set, else "". Their text is cleaned as history lines are: one
+// line each, without control characters and with angle brackets
+// neutralised, so it cannot close or open a tag.
+func readerBlocks(profile string, mute []string) string {
+	var b strings.Builder
+	if p := promptText(profile); p != "" {
+		b.WriteString("\n\n<reader_profile>\n" + p + "\n</reader_profile>\n" + profileInstruction)
+	}
+	if m := mutedList(mute); m != "" {
+		b.WriteString("\n\nDo not include items mainly about:\n" + m)
+	}
+	return b.String()
+}
+
+// mutedList is the <muted> block listing mute's subjects, cleaned as
+// readerBlocks' text is, or "" if none is left.
+func mutedList(mute []string) string {
+	var muted []string
+	for _, m := range mute {
+		if m := promptText(m); m != "" {
+			muted = append(muted, "- "+m)
+		}
+	}
+	if len(muted) == 0 {
+		return ""
+	}
+	return "<muted>\n" + strings.Join(muted, "\n") + "\n</muted>"
+}
+
+// overviewReader is what the overview's input starts with about the
+// reader: the profile block and the muted list, each only if set, else "".
+func overviewReader(profile string, mute []string) string {
+	var b strings.Builder
+	if p := promptText(profile); p != "" {
+		b.WriteString("<reader_profile>\n" + p + "\n</reader_profile>\n" + overviewProfileNote + "\n\n")
+	}
+	if m := mutedList(mute); m != "" {
+		b.WriteString(overviewMuteNote + "\n" + m + "\n\n")
+	}
+	return b.String()
+}
+
+// promptText is config text for a prompt: one line, without control or
+// invisible characters (see StripControl), angle brackets neutralised.
+func promptText(s string) string {
+	return untag(strings.Join(strings.Fields(StripControl(s)), " "))
+}
+
+// readerTokens is what cfg's reader profile and mute list add to every
+// research request, 0 without them.
+func readerTokens(profile string, mute []string) int64 {
+	if r := readerBlocks(profile, mute); r != "" {
+		return estimateTokens(r)
+	}
+	return 0
 }
 
 // Update reports progress on one section. Index -1 is the overview.
@@ -161,7 +229,7 @@ func (g *Generator) task(i int, budget int64, prior string) Task {
 	if prior == "" {
 		items = min(itemCeiling(s), items)
 	}
-	return Task{Topic: g.cfg.Topics[i], Budget: budget, Searches: s, Items: items, Prior: prior, History: g.history[g.cfg.Topics[i].Name]}
+	return Task{Topic: g.cfg.Topics[i], Budget: budget, Searches: s, Items: items, Prior: prior, History: g.history[g.cfg.Topics[i].Name], Profile: g.cfg.Profile, Mute: g.cfg.Mute}
 }
 
 // needBudget is the budget a pass's prompt is sized with when working out
@@ -176,10 +244,10 @@ const needBudget = 999_999
 func (g *Generator) need(cal *calibration, i int, prior string) int64 {
 	p := g.cfg.Provider.Type
 	if p == "claude-code" {
-		return passCost(p)
+		return passCost(p, planWindow)
 	}
-	t := Task{Topic: g.cfg.Topics[i], Budget: needBudget, Searches: 1, Items: g.caps[i], Prior: prior, History: g.history[g.cfg.Topics[i].Name]}
-	return max(passCost(p), cal.firstSearch(t))
+	t := Task{Topic: g.cfg.Topics[i], Budget: needBudget, Searches: 1, Items: g.caps[i], Prior: prior, History: g.history[g.cfg.Topics[i].Name], Profile: g.cfg.Profile, Mute: g.cfg.Mute}
+	return max(passCost(p, planWindowFor(g.cfg)), cal.firstSearch(t))
 }
 
 func (g *Generator) margin(alloc int64, search bool) int64 {
@@ -402,7 +470,7 @@ func (g *Generator) topUp(ctx context.Context, j *Journal, p *pool, send func(in
 // without searching. It is the only pass that does not search, so a topic
 // gets at most one per run: a top-up pass that cannot search does not run.
 func (g *Generator) narrow(ctx context.Context, j *Journal, p *pool, others []*Section, send func(int, *Section)) {
-	if ctx.Err() != nil || float64(p.used()+overviewNeed(overviewInput(combine(j.Sections, others)))) >= narrowBelow*float64(j.TokenBudget) {
+	if ctx.Err() != nil || float64(p.used()+overviewNeed(g.overviewInput(combine(j.Sections, others)))) >= narrowBelow*float64(j.TokenBudget) {
 		return
 	}
 	cands, score := g.candidates(j, false)
@@ -637,7 +705,7 @@ func (g *Generator) loadHistory(date string) map[string][]Reported {
 func (g *Generator) overview(ctx context.Context, j *Journal, others []*Section, send func(int, *Section)) {
 	ov := &j.Overview
 	sections := combine(j.Sections, others)
-	input := overviewInput(sections)
+	input := g.overviewInput(sections)
 	switch {
 	case ctx.Err() != nil:
 		ov.Status, ov.Error = StatusFailed, "cancelled"
@@ -654,6 +722,16 @@ func (g *Generator) overview(ctx context.Context, j *Journal, others []*Section,
 		}
 	}
 	send(-1, ov)
+}
+
+// overviewInput is the overview's prompt: the finished sections' digests,
+// after the reader profile and mute list if there are any (see
+// overviewReader), or "" if none is finished.
+func (g *Generator) overviewInput(sections []*Section) string {
+	if in := overviewInput(sections); in != "" {
+		return overviewReader(g.cfg.Profile, g.cfg.Mute) + in
+	}
+	return ""
 }
 
 func overviewInput(sections []*Section) string {
@@ -717,7 +795,8 @@ func cleanSources(sources []Source) []Source {
 
 // capItems keeps a digest within n items, Related ones included, and
 // within n items' words (plus a Related label), whatever its format. Items
-// are kept whole and dropped from the end; one item always stays, trimmed
+// are first ranked by their impact tag (see rankItems), then kept whole
+// and dropped from the end, so FYI items go first; one item always stays, trimmed
 // at a sentence if it alone is too long. A digest without recognisable
 // items is trimmed the same way. Non-empty input never comes back empty:
 // if trimming would leave nothing, as when a heading alone is longer than
@@ -727,7 +806,7 @@ func capItems(md string, n int) string {
 	if n <= 0 {
 		return ""
 	}
-	md = StripControl(md)
+	md = rankItems(StripControl(md))
 	blocks := splitDigest(md)
 	budget := n * wordsPerItem
 	hasItems := slices.ContainsFunc(blocks, func(b block) bool { return b.item })
@@ -786,18 +865,28 @@ type block struct {
 
 // splitDigest splits a digest into blocks. Items start at "### " headings,
 // else "## " headings, else top-level bullets, else bold-led lines; a
-// Related label takes the non-item lines after it.
+// Related label takes the non-item lines after it. Lines inside a fenced
+// code block never start an item or label, so a block holds its fences
+// whole, unless one is left open at the end.
 func splitDigest(md string) []block {
 	lines := strings.Split(strings.TrimSpace(md), "\n")
+	code, _ := fenceLines(lines)
 	var start func(string) bool
 	for _, f := range []func(string) bool{
 		func(l string) bool { return strings.HasPrefix(l, "### ") },
 		func(l string) bool { return strings.HasPrefix(l, "## ") },
 		isBullet,
+		// A tag line is the body of the bold line before it; with tags
+		// written as code spans, it never starts with "**" anyway.
 		func(l string) bool { return strings.HasPrefix(l, "**") },
 	} {
-		if slices.ContainsFunc(lines, func(l string) bool { return f(l) && !isRelated(l) }) {
-			start = f
+		for i, l := range lines {
+			if !code[i] && f(l) && !isRelated(l) {
+				start = f
+				break
+			}
+		}
+		if start != nil {
 			break
 		}
 	}
@@ -813,6 +902,8 @@ func splitDigest(md string) []block {
 	}
 	for i, l := range lines {
 		switch {
+		case code[i]:
+			text = append(text, l)
 		case isRelated(l):
 			flush(block{label: true, line: i}, l)
 		case start != nil && start(l):
@@ -824,6 +915,30 @@ func splitDigest(md string) []block {
 	flush(block{}, "")
 	return blocks
 }
+
+// fenceLines reports, for each of lines, whether it is part of a fenced
+// code block, its fence lines included, and whether a block is still open
+// after the last line. A block opens at a line starting with ``` or ~~~
+// and closes at one holding only at least as many of the same character.
+func fenceLines(lines []string) (code []bool, open bool) {
+	code = make([]bool, len(lines))
+	fence := "" // the open block's opening run
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case fence == "":
+			fence = fenceRE.FindString(t)
+		case strings.HasPrefix(t, fence) && strings.Trim(t, fence[:1]) == "":
+			code[i], fence = true, ""
+			continue
+		}
+		code[i] = fence != ""
+	}
+	return code, fence != ""
+}
+
+// fenceRE matches the run of backticks or tildes that opens a fence.
+var fenceRE = regexp.MustCompile("^(?:```+|~~~+)")
 
 func isBullet(l string) bool {
 	if strings.HasPrefix(l, "- ") || strings.HasPrefix(l, "* ") || strings.HasPrefix(l, "+ ") {

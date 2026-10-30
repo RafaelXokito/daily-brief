@@ -443,18 +443,20 @@ func (s *Section) Updates() int {
 }
 
 // updateLineRE matches the start of an item written as an update: a level
-// 2-4 heading, a bullet or a bold line headed "Update:", bold or not.
-var updateLineRE = regexp.MustCompile(`(?i)^(#{2,4} +|(?:[-*+]|\d+[.)]) +)?(\*\*)?\s*update\s*:\s*(\*\*)?\s*`)
+// 2-4 heading, a bullet or a bold line headed "Update:", bold or not, with
+// an impact tag before it or not.
+var updateLineRE = regexp.MustCompile("(?i)^(#{2,4} +|(?:[-*+]|\\d+[.)]) +)?(`(?-i:ACT|WATCH|FYI)` +)?(\\*\\*)?\\s*update\\s*:\\s*(\\*\\*)?\\s*")
 
 // SplitUpdate splits a digest line that starts an item written as an
 // update into its heading or bullet marker and its headline, without the
-// "Update:" prefix or its bold markers, and reports whether it is one.
+// "Update:" prefix or its bold markers, and reports whether it is one. An
+// impact tag before "Update:" starts the headline, as one after it does.
 func SplitUpdate(line string) (lead, headline string, ok bool) {
 	m := updateLineRE.FindStringSubmatchIndex(line)
 	if m == nil {
 		return "", "", false
 	}
-	open, closed := m[4] >= 0, m[6] >= 0
+	open, closed := m[6] >= 0, m[8] >= 0
 	if m[2] < 0 && !open {
 		// A plain "Update:" line is not an item.
 		return "", "", false
@@ -467,34 +469,61 @@ func SplitUpdate(line string) (lead, headline string, ok bool) {
 		// "**Update: headline**": drop the bold's closing marker.
 		headline = strings.Replace(headline, "**", "", 1)
 	}
+	if m[4] >= 0 {
+		headline = line[m[4]:m[5]] + headline
+	}
 	return lead, headline, true
 }
 
 // updateRE matches an "Update:" prefix, bold or not.
 var updateRE = regexp.MustCompile(`(?i)^(\*\*)?\s*update\s*:\s*(\*\*)?\s*`)
 
-// itemLine is an item's first line without heading, bullet or bold markers
-// or an "Update:" prefix, and whether it had one.
+// itemLine is an item's first line without heading, bullet or bold
+// markers, an "Update:" prefix or an impact tag (see splitHead), and
+// whether it had an "Update:" prefix.
 func itemLine(item string) (string, bool) {
 	line, _, _ := strings.Cut(strings.TrimSpace(item), "\n")
-	line = strings.TrimSpace(strings.TrimLeft(line, "#"))
+	line, update := headLine(line)
+	if b := boldRE.FindStringSubmatch(line); b != nil {
+		line = b[1]
+	}
+	return strings.TrimSpace(strings.ReplaceAll(line, "**", "")), update
+}
+
+// headLine is an item's first line without heading or bullet markers, an
+// impact tag or an "Update:" prefix (keeping the bold of "**Update:
+// headline**"), and whether it had an "Update:" prefix (see splitHead).
+func headLine(line string) (string, bool) {
+	line, _, _, update := splitHead(line)
+	return line, update
+}
+
+// splitHead splits an item's first line into its text, without heading or
+// bullet markers, an impact tag (see SplitTag) or an "Update:" prefix,
+// the tag's impact, whether it had one and whether it had the prefix. The
+// tag may come before "Update:" or after it, as in "### `ACT` Update: Foo"
+// and "### Update: `ACT` Foo"; the bold of "**Update: headline**" is kept.
+func splitHead(line string) (head string, imp Impact, tagged, update bool) {
+	line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
 	if isBullet(line) {
 		_, line, _ = strings.Cut(line, " ")
 	}
 	line = strings.TrimSpace(line)
-	m := updateRE.FindStringSubmatchIndex(line)
-	if m != nil {
-		// Keep the bold of "**Update: headline**".
+	untagged := func() {
+		if _, i, rest, ok := SplitTag(line); ok && !tagged {
+			line, imp, tagged = rest, i, true
+		}
+	}
+	untagged()
+	if m := updateRE.FindStringSubmatchIndex(line); m != nil {
 		bold := m[2] >= 0 && m[4] < 0
-		line = line[m[1]:]
+		line, update = line[m[1]:], true
+		untagged()
 		if bold {
 			line = "**" + line
 		}
 	}
-	if b := boldRE.FindStringSubmatch(line); b != nil {
-		line = b[1]
-	}
-	return strings.TrimSpace(strings.ReplaceAll(line, "**", "")), m != nil
+	return line, imp, tagged, update
 }
 
 // itemHeadline is an item's first line without its heading, bullet or bold

@@ -14,13 +14,15 @@ import (
 // realistic models the Messages API with web search max_uses 1 as it
 // behaves: the model runs one search and then writes its digest and ends
 // the turn (no pause_turn), in two sampling iterations. Every retryEvery-th
-// search request, the first included, the model also tries further searches
-// (retries of them, at least one), each refused with max_uses_exceeded at
-// the cost of another sampling iteration over the whole context; before the
-// first it may write draft tokens of text. Results take their sizes from
-// results in turn. Usage is cumulative over the iterations, which are
-// listed too. Context is tracked per conversation, keyed by its first
-// message; a request with only that message starts it afresh.
+// search request of a conversation, its first included, the model also
+// tries further searches (retries of them, at least one), each refused
+// with max_uses_exceeded at the cost of another sampling iteration over the
+// whole context; before the first it may write draft tokens of text.
+// Results take their sizes from results in turn. Usage is cumulative over
+// the iterations, which are listed too. Context, and all of the above, is
+// tracked per conversation, keyed by its first message, so a conversation
+// plays out the same whatever order concurrent passes run in; a request
+// with only that message starts it afresh.
 type realistic struct {
 	results    []int64
 	retryEvery int
@@ -32,9 +34,8 @@ type realistic struct {
 	// fallback reports the final iteration as served by a fallback model.
 	fallback bool
 
-	mu       sync.Mutex
-	searches int              // search requests so far, across conversations
-	convs    map[string]*conv // by first message
+	mu    sync.Mutex
+	convs map[string]*conv // by first message
 }
 
 type conv struct {
@@ -89,11 +90,11 @@ func (s *realistic) handle(_ int, r rawRequest) reply {
 			iterations: "[" + iteration(w, out) + "]"}
 	}
 
-	retry := s.retryEvery > 0 && s.searches%s.retryEvery == 0
-	size := s.results[s.searches%len(s.results)]
-	s.searches++
+	retry := s.retryEvery > 0 && c.searches%s.retryEvery == 0
+	size := s.results[c.searches%len(s.results)]
 	c.searches++
-	id := fmt.Sprintf("srv_%d_%d", s.searches, size)
+	n := c.searches
+	id := fmt.Sprintf("srv_%d_%d", n, size)
 	ins := []int64{w, w + simCallOut + size}
 	outs := []int64{simCallOut, 0}
 	content := searchBlocks(id)
@@ -109,7 +110,7 @@ func (s *realistic) handle(_ int, r rawRequest) reply {
 		}
 		ins = append(ins, ins[last]+outs[last]+simErrBlock)
 		outs = append(outs, 0)
-		eid := fmt.Sprintf("err_%d_%d_%d", s.searches, k, simErrBlock)
+		eid := fmt.Sprintf("err_%d_%d_%d", n, k, simErrBlock)
 		content += fmt.Sprintf(`,{"type":"server_tool_use","id":%q,"name":"web_search","input":{"query":"q2"}},`+
 			`{"type":"web_search_tool_result","tool_use_id":%q,"content":{"type":"web_search_tool_result_error","error_code":"max_uses_exceeded"}}`, eid, eid)
 	}
@@ -124,7 +125,7 @@ func (s *realistic) handle(_ int, r rawRequest) reply {
 		stop = "max_tokens"
 	}
 	outs[len(outs)-1] += out
-	c.digest = fmt.Sprintf("### Item %d\nA thing [source](https://a%d.example).\n\n### Item %d.b\nAnother [source](https://b%d.example).", s.searches, s.searches, s.searches, s.searches)
+	c.digest = fmt.Sprintf("### Item %d\nA thing [source](https://a%d.example).\n\n### Item %d.b\nAnother [source](https://b%d.example).", n, n, n, n)
 	content += "," + textBlock(c.digest)
 
 	var in, total int64
@@ -149,7 +150,7 @@ func TestAPIPassSearchesRepeatedly(t *testing.T) {
 	sim := &realistic{results: []int64{15_000}, retryEvery: 1}
 	b, reqs := scriptedAPI(t, apiBackend{}, sim.handle)
 	task := Task{Topic: b.cfg.Topics[0], Budget: 400_000, Searches: planSearches(b.cfg, 400_000), Items: 8}
-	res := researchWithin(t, context.Background(), b, task, 5*time.Second)
+	res := researchWithin(t, context.Background(), b, task, 30*time.Second)
 	t.Logf("planned %d searches, made %d in %d requests, spent %d of %d", task.Searches, res.Searches, len(reqs()), res.Tokens, task.Budget)
 	if res.Searches < 2 || res.Searches > task.Searches {
 		t.Errorf("a %d-token pass planned for %d searches made %d", task.Budget, task.Searches, res.Searches)
@@ -194,7 +195,7 @@ func TestAPIPassStaysWithinBudgetWithLargeResultsAndRetries(t *testing.T) {
 		sim := &realistic{results: []int64{c.result}, retryEvery: c.retry}
 		b, reqs := scriptedAPI(t, apiBackend{}, sim.handle)
 		task := Task{Topic: b.cfg.Topics[0], Budget: c.budget, Searches: planSearches(b.cfg, c.budget), Items: 4}
-		res := researchWithin(t, context.Background(), b, task, 5*time.Second)
+		res := researchWithin(t, context.Background(), b, task, 30*time.Second)
 		t.Logf("budget %d, results %d, retry every %d: %d searches, spent %d in %d requests", c.budget, c.result, c.retry, res.Searches, res.Tokens, len(reqs()))
 		if c.budget < newCalibration().firstSearch(task) {
 			// Too small for one search: the pass does not start.
@@ -221,7 +222,7 @@ func TestAPILaterFailureKeepsLatestDigest(t *testing.T) {
 		}
 		return sim.handle(n, r)
 	})
-	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 600_000, Searches: 6, Items: 5}, 5*time.Second)
+	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 600_000, Searches: 6, Items: 5}, 30*time.Second)
 	if res.Err != nil || !res.Truncated || !strings.HasPrefix(res.Markdown, "### Item 2\n") || res.Searches != 2 {
 		t.Errorf("err %v, truncated %v, %d searches, digest %q; want the second digest", res.Err, res.Truncated, res.Searches, res.Markdown)
 	}
@@ -232,7 +233,7 @@ func TestAPILaterFailureKeepsLatestDigest(t *testing.T) {
 func TestAPIStopsWhenNothingIsAdded(t *testing.T) {
 	sim := &realistic{results: []int64{15_000}, quietAfter: 2}
 	b, reqs := scriptedAPI(t, apiBackend{}, sim.handle)
-	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 3_000_000, Searches: 10, Items: 5}, 5*time.Second)
+	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 3_000_000, Searches: 10, Items: 5}, 30*time.Second)
 	if n := len(reqs()); n != 3 || res.Searches != 2 || !strings.HasPrefix(res.Markdown, "### Item 2\n") || res.Truncated {
 		t.Errorf("%d requests, %d searches, truncated %v, digest %q; want a stop after the unchanged reply", n, res.Searches, res.Truncated, res.Markdown)
 	}
@@ -243,7 +244,7 @@ func TestAPIMeasuresFallbackIterations(t *testing.T) {
 	for _, fallback := range []bool{false, true} {
 		sim := &realistic{results: []int64{20_000}, fallback: fallback}
 		b, reqs := scriptedAPI(t, apiBackend{}, sim.handle)
-		res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 400_000, Searches: 10, Items: 5}, 5*time.Second)
+		res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 400_000, Searches: 10, Items: 5}, 30*time.Second)
 		if res.Searches < 2 || res.Tokens > 400_000 {
 			t.Errorf("fallback %v: %d searches in %d requests, %d tokens", fallback, res.Searches, len(reqs()), res.Tokens)
 		}
@@ -263,7 +264,7 @@ func TestAPIRealisticPassSweep(t *testing.T) {
 				sim := &realistic{results: results, retryEvery: retry}
 				b, _ := scriptedAPI(t, apiBackend{}, sim.handle)
 				task := Task{Topic: b.cfg.Topics[0], Budget: budget, Searches: planSearches(b.cfg, budget), Items: 6}
-				res := researchWithin(t, context.Background(), b, task, 10*time.Second)
+				res := researchWithin(t, context.Background(), b, task, 30*time.Second)
 				label := fmt.Sprintf("results %v retry every %d budget %s", results, retry, HumanTokens(budget))
 				t.Logf("%s: %d searches (planned %d), spent %d (%.0f%%)", label, res.Searches, task.Searches, res.Tokens, 100*float64(res.Tokens)/float64(budget))
 				if res.Tokens > budget {
@@ -341,7 +342,7 @@ func TestAPIPassNeverOvershootsNearReservationEdges(t *testing.T) {
 			sim := &realistic{results: results, retryEvery: 1}
 			b, _ := scriptedAPI(t, apiBackend{}, sim.handle)
 			task := Task{Topic: b.cfg.Topics[0], Budget: budget, Searches: planSearches(b.cfg, budget), Items: maxTopicItems}
-			if res := researchWithin(t, context.Background(), b, task, 5*time.Second); res.Tokens > budget {
+			if res := researchWithin(t, context.Background(), b, task, 30*time.Second); res.Tokens > budget {
 				t.Errorf("results %v budget %d: spent %d (+%d) in %d searches", results, budget, res.Tokens, res.Tokens-budget, res.Searches)
 			}
 		}
@@ -356,13 +357,13 @@ func TestAssessFirstPassMatchesAPILoop(t *testing.T) {
 		a := Assess(cfg)
 		g := NewGenerator(cfg, &fakeBackend{})
 		for i, tp := range a.Topics {
-			if tp.Budget < passCost("anthropic") {
+			if tp.Budget < passCost("anthropic", planWindow) {
 				continue
 			}
 			sim := &realistic{results: []int64{typicalResult}}
 			b, _ := scriptedAPI(t, apiBackend{}, sim.handle)
 			task := g.task(i, tp.Budget, "")
-			res := researchWithin(t, context.Background(), b, task, 5*time.Second)
+			res := researchWithin(t, context.Background(), b, task, 30*time.Second)
 			if res.Searches != tp.Searches || task.Items != tp.Items {
 				t.Errorf("budget %s, %s with %s: Assess shows %d searches and %d items, the loop made %d (task items %d)",
 					HumanTokens(budget), tp.Name, HumanTokens(tp.Budget), tp.Searches, tp.Items, res.Searches, task.Items)

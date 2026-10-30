@@ -57,6 +57,8 @@ concurrency: 3              # topics researched in parallel
 model: claude-opus-5-5
 effort: medium              # low | medium | high | xhigh | max
 country: PT                 # optional, ISO code to localize search results
+profile: "Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor"   # optional, about you (≤ 500 characters)
+mute: [crypto, celebrity tech gossip]                                # optional, subjects to leave out (≤ 30, ≤ 80 characters each)
 price_input_per_mtok: 4     # USD, only for cost estimates on API providers
 price_output_per_mtok: 20
 price_per_1k_searches: 10
@@ -67,6 +69,90 @@ topics:
     focus: Critical or actively exploited CVEs, supply-chain attacks, ...
     weight: 2               # gets twice the default share of the budget (weights may differ by at most 1000:1)
 ```
+
+### Impact tags
+
+Every item carries one impact tag, written as a code span at the start of
+its first line after the headline:
+
+```markdown
+### Widget server flaw exploited in the wild
+`ACT` CVE-2026-1234 · CVSS 9.8 · KEV due Nov 10 · fixed in 3.2.1
+Unauthenticated attackers run code on exposed servers; upgrade now. [source](https://…)
+```
+
+- `ACT` (act today): do something now: patch, upgrade, rotate credentials,
+  a deadline.
+- `WATCH`: likely to matter soon.
+- `FYI`: worth knowing.
+
+Security items put terse facts after the tag when known (CVE ids, CVSS
+score, whether it is in CISA KEV and its due date, affected and fixed
+versions), finance items the key figure or ticker. Tag, facts and sentences
+all count within the item's ~45 words. The code span was chosen because it is
+one word to the word cap, survives trimming and history extraction, and still
+reads well as plain Markdown. A tag is recognised in that one form only: an
+uppercase code span, `` `ACT` ``, `` `WATCH` `` or `` `FYI` ``, followed by a
+space or the end of the line, at the start of the headline line (after the
+heading or list marker, before or after an `Update:` prefix) or at the start
+of the item's first non-blank body line. Nothing else is a tag: not
+`` `act` `` (the nektos/act tool, React's `act`), `**Action:**`, `[INFO]`,
+`FYI, the …`, a tag on a later line or one inside a code block. Only the
+first tag counts; a second stays as text. An item without a tag, as in
+journals written before tags existed, counts as FYI.
+
+Items are ranked ACT, then WATCH, then FYI, keeping the model's order within
+a tag; if a pass gets the order wrong, it is fixed in code before the digest
+is cut to its cap, so FYI items are the first to go. Items after a Related
+label stay after it, ranked among themselves. Ranking moves fenced code
+blocks whole with their item (a `### ` line inside one never starts an
+item), and leaves a digest as it is if a code block is left open at its end
+or an item's headline is not recognised. A headline never includes its
+tag, so history and highlight matching ignore it. On the overview, a
+highlight of a tagged item is `act` exactly when the item is tagged `ACT`
+(a highlight of an untagged item keeps the model's tier), and the numbers
+line counts the items to act on (`12 items · 3 to act · …`; left out when no
+item is tagged). The TUI shows tags as coloured badges (ACT red, WATCH amber,
+FYI muted) on exactly the lines where a tag is recognised, a facts line
+muted on a line of its own, and the sidebar a count
+of a topic's ACT items beside its updates (`!2 ↻1`). `y` copies an item with
+its tag as `[ACT]`. `-print` piped stays the journal's Markdown exactly.
+
+### Profile and mute list
+
+`profile` (free text, at most 500 characters) tells research passes who the
+journal is for: items that affect your stack or holdings rank higher, may be
+`ACT`, and say how they affect you ("affects your Quarkus 3.x apps"). The
+overview gets it too, so its highlights' "why" is personal. `mute` (at most 30
+entries of 80 characters) lists subjects or keywords to leave out; passes are
+told not to include items mainly about them, and the overview not to pick
+highlights mainly about them. Both are given in the prompt as
+blocks, cleaned like history lines (one line each, control and invisible
+characters removed, though the joiners emoji and some scripts need stay,
+`< >` replaced by `‹ ›`):
+
+```
+<reader_profile>
+Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor
+</reader_profile>
+Where an item affects this reader's stack or holdings, say so ... it may be tagged `ACT`.
+
+Do not include items mainly about:
+<muted>
+- crypto
+- celebrity tech gossip
+</muted>
+```
+
+Muting is done by the prompt alone, like deduplication: dropping items whose
+headline contains a muted word would also drop legitimate ones (muting
+"crypto" would drop "Go crypto/tls flaw"). Without a profile or mute list the
+prompts, the overview's included, are exactly as before. With them, every request of every pass carries
+the blocks (up to about 1.3k tokens by the API backend's estimate at the
+limits); the API backend's reservations count them, since they are sized by
+the prompt really sent, and `daily-brief budget` plans each first request at
+6k tokens plus the blocks' size, so the baseline grows slightly with a
+profile and is unchanged without one.
 
 ### The token budget
 
@@ -276,8 +362,10 @@ parser):
 {"highlights":[{"tier":"act","topic":"Security","headline":"<the item's headline>","text":"≤18 words","why":"≤14 words"}]}
 ```
 
-`act` is for security actions and deadlines, `know` for what is worth
-knowing; new stories are preferred over updates unless an update is major.
+`act` is for security actions and deadlines (items tagged `ACT`), `know`
+for what is worth knowing; new stories are preferred over updates unless an
+update is major. A highlight of a tagged item is then made `act` exactly when
+the item is tagged `ACT`.
 In code, the first JSON object of the reply with highlights is taken (code
 fences and prose around it are fine), and each highlight must name a
 finished topic and one of its items (the item with that very headline, else
@@ -288,7 +376,7 @@ plain (links become their text; URLs, control characters and leading `#`,
 characters. They are saved in the journal as the overview's `highlights`, and its
 Markdown (for `-print` and the reading time) is built from them, each with a
 link to its item's source. Two lines are added in code at no token cost: a
-numbers line (`12 items · 2 updates · 5 topics · ~7 min`) and a status line
+numbers line (`12 items · 3 to act · 2 updates · 5 topics · ~7 min`) and a status line
 per topic (`Java & Quarkus — 3 items, 1 update`, `AI — quiet day`); with
 many topics the status lines are left out rather than the highlights.
 Highlights are dropped from the end until the whole fits about 180 words. A
@@ -329,7 +417,8 @@ item is written as `### Update: <headline>` and starts with what is new
 other item. The TUI shows it as `↻ Update · …`, and the sidebar shows a
 muted count of a topic's updates (`↻2`). The marker and the count recognise
 the same forms: a heading, bullet or bold line starting `Update:`, bold or
-not. The overview prefers new stories
+not, with an impact tag before or after it or none (`` ### `ACT` Update: Foo ``
+is an update headed "Foo", shown with its badge first). The overview prefers new stories
 over updates unless an update is major. A big story therefore only returns
 as an update; there is no separate "ongoing" list.
 
@@ -425,7 +514,8 @@ Topics are rendered as Markdown with glamour, in a style derived from its
 dark or light style: headings without `#` marks (topic names in the accent
 colour, item headlines bold with space above), a margin of one cell, updates
 as `↻ Update · …`, a Related label as a rule and a small "Related" heading,
-and each source as its title and domain. Digests come from web pages
+impact tags as coloured badges with a muted facts line, and each source as its
+title and domain. Digests come from web pages
 through the model, so they are treated as hostile. Control characters (C0
 but newline and tab, DEL and C1), which a terminal could act on, and the
 invisible characters that reorder or hide text (bidi controls such as

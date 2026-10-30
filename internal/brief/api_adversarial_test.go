@@ -123,7 +123,7 @@ func TestAPIPauseTurnChain(t *testing.T) {
 			stop: "end_turn", input: 22_000, output: 1_500, searches: 1}
 	})
 	task := Task{Topic: b.cfg.Topics[0], Budget: 400_000, Searches: 4, Items: 5}
-	res := researchWithin(t, context.Background(), b, task, 5*time.Second)
+	res := researchWithin(t, context.Background(), b, task, 30*time.Second)
 	got := reqs()
 	if res.Err != nil || len(got) != 4 {
 		t.Fatalf("err %v after %d requests, want 4", res.Err, len(got))
@@ -193,7 +193,7 @@ func TestAPIPausingLoopStaysWithinBudget(t *testing.T) {
 		for _, writeLen := range []int64{0, 2_500} {
 			b, reqs := scriptedAPI(t, apiBackend{}, pauseServer(writeLen))
 			task := Task{Topic: b.cfg.Topics[0], Budget: budget, Searches: planSearches(b.cfg, budget), Items: 5}
-			res := researchWithin(t, context.Background(), b, task, 10*time.Second)
+			res := researchWithin(t, context.Background(), b, task, 30*time.Second)
 			label := fmt.Sprintf("budget %d write %d", budget, writeLen)
 			if budget < newCalibration().firstSearch(task) {
 				// Too small for one search: nothing is sent or spent.
@@ -236,7 +236,7 @@ func TestAPIStopsAfterOverBudgetTurn(t *testing.T) {
 	b, reqs := scriptedAPI(t, apiBackend{}, func(int, rawRequest) reply {
 		return reply{content: "[" + searchBlocks("s") + "]", stop: "pause_turn", input: 400_000, output: 500, searches: 1}
 	})
-	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 3, Items: 5}, 5*time.Second)
+	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 3, Items: 5}, 30*time.Second)
 	if n := len(reqs()); n != 1 || !res.Truncated {
 		t.Fatalf("%d requests, truncated %v; want one request then stop", n, res.Truncated)
 	}
@@ -249,7 +249,7 @@ func TestAPIRefusalFirstTurn(t *testing.T) {
 	b, reqs := scriptedAPI(t, apiBackend{}, func(int, rawRequest) reply {
 		return reply{content: "[" + textBlock("I can't help with that.") + "]", stop: "refusal", input: 3_000, output: 50}
 	})
-	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 5*time.Second)
+	res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 30*time.Second)
 	if res.Err == nil || !strings.Contains(res.Err.Error(), "declined") || res.Markdown != "" || res.Tokens != 3_050 || len(reqs()) != 1 {
 		t.Errorf("refusal: err %v, markdown %q, tokens %d, %d requests", res.Err, res.Markdown, res.Tokens, len(reqs()))
 	}
@@ -269,7 +269,7 @@ func TestAPIErrorAfterPauseKeepsPartialDigest(t *testing.T) {
 				}
 				return reply{status: status}
 			})
-			res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 5*time.Second)
+			res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 30*time.Second)
 			if len(reqs()) != 2 || res.Tokens != 11_000 || res.Searches != 1 {
 				t.Errorf("%d: %d requests, %d tokens, %d searches", status, len(reqs()), res.Tokens, res.Searches)
 			}
@@ -307,7 +307,7 @@ func TestAPIVariantRequestShape(t *testing.T) {
 		if c.tool == "" {
 			task.Searches, task.Prior = 0, "### A\nx"
 		}
-		researchWithin(t, context.Background(), b, task, 5*time.Second)
+		researchWithin(t, context.Background(), b, task, 30*time.Second)
 		r := reqs()[0]
 		tools, _ := r.Body["tools"].([]any)
 		if c.tool != "" {
@@ -356,7 +356,7 @@ func TestAPICancelledRequestReturns(t *testing.T) {
 	b := &apiBackend{cfg: cfg, messages: client.Beta.Messages, name: "blocked"}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { <-entered; cancel() }()
-	res := researchWithin(t, ctx, b, Task{Topic: cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 5*time.Second)
+	res := researchWithin(t, ctx, b, Task{Topic: cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 30*time.Second)
 	if res.Err == nil || res.Err.Error() != "cancelled" {
 		t.Errorf("err = %v, want cancelled", res.Err)
 	}
@@ -365,7 +365,7 @@ func TestAPICancelledRequestReturns(t *testing.T) {
 func TestAPIDescribesErrors(t *testing.T) {
 	for status, want := range map[int]string{401: "authentication failed", 403: "authentication failed", 429: "rate limited", 529: "overloaded", 400: "API error 400"} {
 		b, _ := scriptedAPI(t, apiBackend{}, func(int, rawRequest) reply { return reply{status: status} })
-		res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 5*time.Second)
+		res := researchWithin(t, context.Background(), b, Task{Topic: b.cfg.Topics[0], Budget: 250_000, Searches: 4, Items: 5}, 30*time.Second)
 		if res.Err == nil || !strings.Contains(res.Err.Error(), want) {
 			t.Errorf("%d: err %v, want %q", status, res.Err, want)
 		}

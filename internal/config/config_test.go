@@ -183,3 +183,73 @@ func TestReadingCapLeavesAnItem(t *testing.T) {
 		t.Errorf("2 minutes, 60 topics: err %v", err)
 	}
 }
+
+// The profile and mute list load cleaned: control and invisible
+// characters gone, one line each, blank mute entries dropped. Provider's
+// own "profile" is a different key.
+func TestLoadProfileAndMute(t *testing.T) {
+	cfg, err := loadYAML(t, "provider:\n  type: anthropic\n  auth: profile\n  profile: work\n"+
+		"profile: \"Java 21,\\nQuarkus 3.x\\u001b[31m \\u202Eand Kafka\"\n"+
+		"mute:\n  - crypto\n  - \"  \"\n  - \"celebrity\\ttech\\u200Bgossip\"\n"+
+		"topics:\n  - name: A\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Profile != "Java 21, Quarkus 3.x [31m and Kafka" || cfg.Provider.Profile != "work" {
+		t.Errorf("profile %q, provider profile %q", cfg.Profile, cfg.Provider.Profile)
+	}
+	// A zero-width space is removed, as brief.StripControl does, not
+	// turned into a space.
+	if strings.Join(cfg.Mute, "|") != "crypto|celebrity techgossip" {
+		t.Errorf("mute %q", cfg.Mute)
+	}
+	cfg, err = loadYAML(t, "topics:\n  - name: A\n")
+	if err != nil || cfg.Profile != "" || cfg.Mute != nil {
+		t.Errorf("default profile %q, mute %q, %v", cfg.Profile, cfg.Mute, err)
+	}
+}
+
+// The profile is at most 500 characters, the mute list at most 30 entries
+// of 80 characters, counted in characters, not bytes.
+func TestProfileAndMuteLimits(t *testing.T) {
+	ok := Default()
+	ok.Profile = strings.Repeat("é", MaxProfileChars)
+	for range MaxMuteEntries {
+		ok.Mute = append(ok.Mute, strings.Repeat("ü", MaxMuteChars))
+	}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("at the limits: %v", err)
+	}
+	for name, mod := range map[string]func(*Config){
+		"profile":     func(c *Config) { c.Profile += "x" },
+		"entries":     func(c *Config) { c.Mute = append(c.Mute, "x") },
+		"entry chars": func(c *Config) { c.Mute[3] += "x" },
+	} {
+		c := ok
+		c.Mute = append([]string(nil), ok.Mute...)
+		mod(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s over the limit accepted", name)
+		}
+	}
+}
+
+// The default config file documents profile and mute with examples.
+func TestDefaultConfigDocumentsProfileAndMute(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# profile:", "Quarkus 3.x", "# mute:", "celebrity tech gossip"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("default config lacks %q", want)
+		}
+	}
+	if cfg, _, err := Load(path); err != nil || cfg.Profile != "" || len(cfg.Mute) != 0 {
+		t.Errorf("default config reloads with profile %q, mute %q, %v", cfg.Profile, cfg.Mute, err)
+	}
+}

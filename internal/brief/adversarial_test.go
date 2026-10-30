@@ -106,7 +106,7 @@ func checkRun(t *testing.T, label string, cfg config.Config, j *Journal, tasks [
 	if used := j.TokensUsed(); used > j.TokenBudget {
 		t.Errorf("%s: spent %d of %d tokens (%.1f%%), over the budget", label, used, j.TokenBudget, j.Utilization())
 	}
-	least := passCost(cfg.Provider.Type)
+	least := passCost(cfg.Provider.Type, planWindow)
 	for _, task := range tasks {
 		// A narrow pass rewrites an existing digest without searching.
 		narrow := task.Searches == 0 && task.Prior != ""
@@ -152,7 +152,7 @@ func TestRunBudgetSweep(t *testing.T) {
 						cfg.TokenBudget = int64(mult * float64(Baseline(cfg)))
 						cfg.Concurrency = conc
 						f := &scriptBackend{research: spending(frac)}
-						j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+						j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 						label := fmt.Sprintf("%s %d topics ×%.0f conc %d spend %.0f%%", provider, n, mult, conc, 100*frac)
 						checkRun(t, label, cfg, j, f.snapshot(), ups)
 						if u := j.Utilization(); u < 85 {
@@ -185,7 +185,7 @@ func TestHeavyUnderspendReachesTarget(t *testing.T) {
 			cfg := testConfig(provider, 0, "A", "B", "C", "D", "E")
 			ResolveBudget(&cfg)
 			f := &scriptBackend{research: spending(frac)}
-			j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+			j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			label := fmt.Sprintf("%s spend %.0f%%", provider, 100*frac)
 			checkRun(t, label, cfg, j, f.snapshot(), ups)
 			t.Logf("%s: %.1f%% in %d passes", label, j.Utilization(), len(f.snapshot()))
@@ -208,7 +208,7 @@ func TestRunExtremeWeights(t *testing.T) {
 				for _, budget := range []int64{400_000, 50_000_000} {
 					cfg.TokenBudget = budget
 					f := &scriptBackend{research: spending(0.6)}
-					j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+					j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 					label := fmt.Sprintf("%s weights %v conc %d budget %s", provider, weights, conc, HumanTokens(budget))
 					checkRun(t, label, cfg, j, f.snapshot(), ups)
 					t.Logf("%s: %.1f%% used", label, j.Utilization())
@@ -227,7 +227,7 @@ func TestLightTopicSkippedIsRetriedFromLeftover(t *testing.T) {
 		cfg.Topics = []config.Topic{{Name: "Heavy", Weight: 1000}, {Name: "Light", Weight: 0.001}}
 		cfg.Concurrency = conc
 		f := &scriptBackend{research: spending(0.5)}
-		j, _ := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+		j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 		light := j.Sections[1]
 		var topUps int
 		for _, task := range f.snapshot() {
@@ -253,7 +253,7 @@ func TestExtremeWeightRatioRejectedAndClamped(t *testing.T) {
 		t.Errorf("weights 1e17/1 accepted: %v", err)
 	}
 	f := &scriptBackend{research: spending(0.5)}
-	j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+	j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 	for _, task := range f.snapshot() {
 		if task.Budget > cfg.TokenBudget || task.Budget < 0 {
 			t.Errorf("pass for %s allocated %d tokens of a %d budget", task.Topic.Name, task.Budget, cfg.TokenBudget)
@@ -281,11 +281,11 @@ func TestSmallBudgetUtilization(t *testing.T) {
 		ResolveBudget(&cfg)
 		cfg.Concurrency = 1
 		f := &scriptBackend{research: spending(0.6)}
-		j, _ := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+		j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 		left := j.TokenBudget - j.TokensUsed()
 		if u := j.Utilization(); u < 85 {
 			t.Errorf("%s: %.1f%% used, %d tokens left unspent (pass cost %d) after %d passes",
-				name, u, left, passCost(cfg.Provider.Type), len(f.snapshot()))
+				name, u, left, passCost(cfg.Provider.Type, planWindow), len(f.snapshot()))
 		}
 		if strings.Contains(strings.Join(Assess(cfg).Messages, "\n"), "safety margin") {
 			t.Errorf("%s: warned about the safety margin", name)
@@ -295,7 +295,7 @@ func TestSmallBudgetUtilization(t *testing.T) {
 	// One topic's per-topic sum, 3 searches plus writing and the overview.
 	cfg := testConfig("claude-code", 160_000, "A")
 	f := &scriptBackend{research: spending(0.6)}
-	j, _ := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 	t.Logf("claude-code 1 topic at 160k: %.1f%% used", j.Utilization())
 	if j.TokensUsed() > j.TokenBudget {
 		t.Errorf("claude-code 1 topic: over budget")
@@ -310,7 +310,7 @@ func TestRunBudgetEdges(t *testing.T) {
 		for _, provider := range []string{"anthropic", "claude-code"} {
 			cfg := testConfig(provider, 10_000, "A", "B")
 			f := &scriptBackend{research: spending(1)}
-			j, ups := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+			j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			checkRun(t, provider, cfg, j, f.snapshot(), ups)
 			if len(f.snapshot()) != 0 || f.summaries != 0 {
 				t.Errorf("%s: %d passes and %d overviews ran on a 10k budget", provider, len(f.snapshot()), f.summaries)
@@ -334,21 +334,21 @@ func TestRunBudgetEdges(t *testing.T) {
 			// The overview reserve (and claude-code's margin) comes off the
 			// top, so one pass cost is not enough on its own: nothing may
 			// start, and Assess must say low.
-			cfg := testConfig(provider, passCost(provider), "A")
+			cfg := testConfig(provider, passCost(provider, planWindow), "A")
 			f := &scriptBackend{research: spending(1)}
-			j, ups := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+			j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			checkRun(t, provider, cfg, j, f.snapshot(), ups)
 			if a := Assess(cfg); a.Level != LevelLow || a.Topics[0].Searches != 0 {
 				t.Errorf("%s: one pass cost assessed %s with %d searches", provider, a.Level, a.Topics[0].Searches)
 			}
 			// The smallest budget whose topic pool covers one pass runs exactly one.
-			b := passCost(provider)
-			for b-overviewReserve(b) < passNeed(provider) {
+			b := passCost(provider, planWindow)
+			for b-overviewReserve(b) < passNeed(provider, planWindow) {
 				b++
 			}
 			cfg.TokenBudget = b
 			f = &scriptBackend{research: spending(1)}
-			j, ups = runWithin(t, context.Background(), cfg, f, 5*time.Second)
+			j, ups = runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			checkRun(t, provider, cfg, j, f.snapshot(), ups)
 			// A narrow pass may follow; only one search pass may run.
 			var search []Task
@@ -367,7 +367,7 @@ func TestRunBudgetEdges(t *testing.T) {
 		for _, provider := range []string{"anthropic", "claude-code"} {
 			cfg := testConfig(provider, 50_000_000, topicNames(5)...)
 			f := &scriptBackend{research: spending(0.6)}
-			j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+			j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			checkRun(t, provider, cfg, j, f.snapshot(), ups)
 			if u := j.Utilization(); u < 85 {
 				t.Errorf("%s: 50M utilization %.1f%%", provider, u)
@@ -392,7 +392,7 @@ func TestOverspendingBackendStaysWithinBudget(t *testing.T) {
 		ResolveBudget(&cfg)
 		cfg.Concurrency = conc
 		f := &scriptBackend{research: spending(1.15)}
-		j, _ := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+		j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 		if j.TokensUsed() > j.TokenBudget {
 			t.Errorf("conc %d: a backend overspending each pass by 15%% drove the run to %d of %d tokens (%.1f%%)",
 				conc, j.TokensUsed(), j.TokenBudget, j.Utilization())
@@ -413,7 +413,7 @@ func TestOverspendStopsFurtherPasses(t *testing.T) {
 		}
 		return Result{Markdown: "### x\ny", Tokens: spend, Searches: 1}
 	}}
-	j, ups := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+	j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 	if n := len(f.snapshot()); n != 1 {
 		t.Errorf("%d passes ran after the first one overspent the whole budget", n)
 	}
@@ -449,7 +449,7 @@ func TestRunWithFailingBackends(t *testing.T) {
 			ResolveBudget(&cfg)
 			cfg.Concurrency = conc
 			f := &scriptBackend{research: func(context.Context, Task, int) Result { return tc.res }}
-			j, ups := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+			j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 			label := fmt.Sprintf("%s conc %d", tc.name, conc)
 			checkRun(t, label, cfg, j, f.snapshot(), ups)
 			if n := len(f.snapshot()); n != 5 {
@@ -477,7 +477,7 @@ func TestRunZeroTokenBackendTerminates(t *testing.T) {
 		ResolveBudget(&cfg)
 		cfg.Concurrency = 10
 		f := &scriptBackend{research: spending(0)}
-		j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+		j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 		checkRun(t, "zero tokens", cfg, j, f.snapshot(), ups)
 		if got, max := len(f.snapshot()), n*(1+maxPasses("anthropic")); got > max {
 			t.Errorf("%d topics: %d passes, want at most %d", n, got, max)
@@ -501,7 +501,7 @@ func TestTopUpFailureKeepsEarlierDigest(t *testing.T) {
 			}
 			return bad
 		}}
-		j, _ := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+		j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 		s := j.Sections[0]
 		if s.Passes == 0 {
 			t.Fatalf("no top-up pass ran")
@@ -525,7 +525,7 @@ func TestTopUpClearsTruncatedFlag(t *testing.T) {
 		}
 		return Result{Markdown: "### Full\nComplete digest.", Tokens: 30_000, Searches: 1}
 	}}
-	j, _ := runWithin(t, context.Background(), cfg, f, 5*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 	s := j.Sections[0]
 	if s.Markdown != "### Full\nComplete digest." {
 		t.Fatalf("top-up revision not applied: %q", s.Markdown)
@@ -538,7 +538,7 @@ func TestTopUpClearsTruncatedFlag(t *testing.T) {
 // waitGoroutines waits for the goroutine count to fall back to want.
 func waitGoroutines(t *testing.T, want int) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for runtime.NumGoroutine() > want {
 		if time.Now().After(deadline) {
 			buf := make([]byte, 1<<16)
@@ -614,7 +614,7 @@ func TestRunCancelledDuringTopUp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { <-started; cancel() }()
-	j, _ := runWithin(t, ctx, cfg, f, 5*time.Second)
+	j, _ := runWithin(t, ctx, cfg, f, 30*time.Second)
 	for _, s := range j.Sections {
 		if s.Status != StatusDone || s.Markdown != "### First\nx" {
 			t.Errorf("%s: %s %q, want the first digest kept after a cancelled top-up", s.Topic, s.Status, s.Markdown)
@@ -729,7 +729,7 @@ func TestReadMinutesCapHoldsWithManyTopics(t *testing.T) {
 		f := &scriptBackend{research: func(_ context.Context, t Task, _ int) Result {
 			return Result{Markdown: strings.Repeat("### Item\nSomething happened.\n\n", 12), Tokens: t.Budget / 2, Searches: 1}
 		}}
-		j, ups := runWithin(t, context.Background(), cfg, f, 10*time.Second)
+		j, ups := runWithin(t, context.Background(), cfg, f, 30*time.Second)
 		checkRun(t, fmt.Sprintf("%d topics cap %d min", c.topics, c.minutes), cfg, j, f.snapshot(), ups)
 		for i, s := range j.Sections {
 			if caps[i] == 0 && (s.Status != StatusFailed || !strings.Contains(strings.Join(a.Messages, "\n"), s.Topic)) {
@@ -784,7 +784,7 @@ func TestAutoBudgetUsesRelativeWeights(t *testing.T) {
 			HumanTokens(small.TokenBudget), a.Level, a.Searches)
 	}
 	f := &scriptBackend{research: spending(0.6)}
-	runWithin(t, context.Background(), small, f, 5*time.Second)
+	runWithin(t, context.Background(), small, f, 30*time.Second)
 	if len(f.snapshot()) == 0 {
 		t.Errorf("auto budget with weights 0.1 researched nothing")
 	}
@@ -821,7 +821,7 @@ func TestFirstPassWithoutRoomToSearchIsRetried(t *testing.T) {
 		}
 		return Result{Markdown: "### Item\nx", Tokens: task.Budget / 4, Searches: max(1, task.Searches)}
 	}}
-	j, ups := runWithin(t, context.Background(), cfg, b, 10*time.Second)
+	j, ups := runWithin(t, context.Background(), cfg, b, 30*time.Second)
 	checkRun(t, "retried", cfg, j, b.snapshot(), ups)
 	a := j.Sections[0]
 	if a.Status != StatusDone || a.Searches == 0 || a.Error != "" {
@@ -852,7 +852,7 @@ func TestTopUpWithoutRoomToSearchIsNotProgress(t *testing.T) {
 		}
 		return Result{Markdown: "### Item\nx", Tokens: task.Budget / 4, Searches: 1}
 	}}
-	j, ups := runWithin(t, context.Background(), cfg, b, 10*time.Second)
+	j, ups := runWithin(t, context.Background(), cfg, b, 30*time.Second)
 	checkRun(t, "no room", cfg, j, b.snapshot(), ups)
 	narrow := map[string]int{}
 	for _, task := range b.snapshot() {

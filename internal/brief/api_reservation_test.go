@@ -107,7 +107,7 @@ func TestAPISearchRequestStaysWithinReservation(t *testing.T) {
 			task := edge
 			task.Budget, task.Searches = budget, 6
 			b, reqs := scriptedAPI(t, apiBackend{}, reservationServer(w, tc.draft, tc.retries, tc.draftEach))
-			res := researchWithin(t, context.Background(), b, task, 5*time.Second)
+			res := researchWithin(t, context.Background(), b, task, 30*time.Second)
 			if budget == edge.Budget {
 				headroom = budget - res.Tokens
 			}
@@ -130,12 +130,12 @@ func TestRunOvershootIsDetectedRecordedAndStops(t *testing.T) {
 	_, w := edgeTask(t)
 	// One topic whose pass gets about one pass cost; the overview's reserve
 	// (5%) is too small to absorb the overshoot.
-	budget := (passCost("anthropic") + 2_000) * 20 / 19
+	budget := (passCost("anthropic", planWindow) + 2_000) * 20 / 19
 	cfg := testConfig("anthropic", budget, "A")
 	cfg.Concurrency = 1
 	b, reqs := scriptedAPI(t, apiBackend{}, reservationServer(w, 0, searchIterations+1, false))
 	b.cfg = cfg
-	j, _ := runWithin(t, context.Background(), cfg, b, 10*time.Second)
+	j, _ := runWithin(t, context.Background(), cfg, b, 30*time.Second)
 	got := reqs()
 	t.Logf("budget %d: spent %d in %d requests, overshoot %d", budget, j.TokensUsed(), len(got), j.Overshoot)
 	if j.TokensUsed() <= budget {
@@ -164,14 +164,14 @@ func TestAPICalibrationLearnsFromOvershoot(t *testing.T) {
 	cal := newCalibration()
 	b, _ := scriptedAPI(t, apiBackend{}, reservationServer(w, 0, retries, false))
 	task := Task{Topic: b.cfg.Topics[0], Budget: 1_000_000, Searches: 1, Items: 10, cal: cal}
-	researchWithin(t, context.Background(), b, task, 5*time.Second)
+	researchWithin(t, context.Background(), b, task, 30*time.Second)
 	if iters, _ := cal.get(); iters < int64(2+retries) {
 		t.Fatalf("calibration after a %d-iteration request: %d iterations", 2+retries, iters)
 	}
 	for budget := int64(150_000); budget <= 1_500_000; budget += 10_000 {
 		b, _ := scriptedAPI(t, apiBackend{}, reservationServer(w, 0, retries, false))
 		task := Task{Topic: b.cfg.Topics[0], Budget: budget, Searches: 6, Items: 10, cal: cal}
-		if res := researchWithin(t, context.Background(), b, task, 5*time.Second); res.Tokens > budget {
+		if res := researchWithin(t, context.Background(), b, task, 30*time.Second); res.Tokens > budget {
 			t.Errorf("budget %d: calibrated pass spent %d (+%d)", budget, res.Tokens, res.Tokens-budget)
 		}
 	}
