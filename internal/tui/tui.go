@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -91,6 +92,7 @@ type Model struct {
 	sidebarTop int  // the first topic row shown when they don't all fit
 	showHelp   bool // the key list replaces the viewport
 	reader     bool // reader mode: no sidebar, the summary at full width
+	mouse      bool // the TUI has the mouse (see WithMouse)
 	viewport   viewport.Model
 	keysView   viewport.Model // the key list, scrolled on its own
 	spinner    spinner.Model
@@ -98,6 +100,9 @@ type Model struct {
 	width      int
 	height     int
 	ready      bool
+	// bodyTop is the screen row the panes' bodies start at, as View last
+	// drew them, or -1 when it drew none; hitTest measures from it.
+	bodyTop int
 
 	content string // the viewport's rendered lines
 	// cursor is the selected highlight on the Overview, in display order;
@@ -135,7 +140,19 @@ type Model struct {
 func New(gen *brief.Generator, genErr error, journal *brief.Journal, theme string) *Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(accent)
-	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, theme: theme, item: -1, open: openURL, copy: copyText, editor: openEditor}
+	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, theme: theme, item: -1, bodyTop: -1,
+		open: openURL, copy: copyText, editor: openEditor}
+}
+
+// WithMouse says whether the program was started with the mouse on (see
+// main's programOptions): clicks and the wheel are then handled, and the
+// help says how to select text.
+func (m *Model) WithMouse(on bool) *Model {
+	m.mouse = on
+	if m.ready {
+		m.refreshKeys()
+	}
+	return m
 }
 
 // openURL opens url with the system's opener, if it is an http(s) URL
@@ -256,6 +273,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Keys never reach the viewport, so ← and → can't scroll it sideways.
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		// Nor does the mouse: handleMouse decides what each region does.
+		return m, m.handleMouse(msg)
 
 	case updateMsg:
 		if msg.Index < 0 {
@@ -436,6 +457,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reader = !m.reader
 		m.focus = focusSummary
 		m.resize()
+	case key.Matches(msg, keys.Mouse):
+		// For this session only; the Settings pane saves it.
+		flash := "mouse off"
+		if !m.mouse {
+			flash = "mouse on · shift-drag to select"
+		}
+		return m, tea.Batch(m.applyMouse(!m.mouse), m.flashMsg(flash))
 	case key.Matches(msg, keys.Regenerate):
 		var note tea.Cmd
 		if m.building != nil && !m.generating {
@@ -845,6 +873,7 @@ func (m *Model) View() string {
 	if !m.ready || m.journal == nil {
 		return ""
 	}
+	m.bodyTop = -1
 	switch m.layout() {
 	case layoutCompact:
 		return m.compactView()
@@ -886,7 +915,9 @@ func (m *Model) View() string {
 	}
 	title := paneTitle(truncate(m.paneName(), m.viewport.Width), m.focus == focusSummary || m.showHelp || m.set != nil)
 	if m.reader {
-		return truncate(header, m.width) + "\n\n" + title + "\n" + content + "\n" + m.helpText()
+		top := truncate(header, m.width) + "\n\n" + title + "\n"
+		m.bodyTop = strings.Count(top, "\n")
+		return top + content + "\n" + m.helpText()
 	}
 	titles := lipgloss.NewStyle().Width(sidebarWidth+2).Render(paneTitle("Topics", m.focus == focusTopics)) + title
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
@@ -894,7 +925,9 @@ func (m *Model) View() string {
 		" ",
 		content,
 	)
-	return truncate(header, m.width) + "\n\n" + titles + "\n" + body + "\n" + m.helpText()
+	top := truncate(header, m.width) + "\n\n" + titles + "\n"
+	m.bodyTop = strings.Count(top, "\n")
+	return top + body + "\n" + m.helpText()
 }
 
 // compactView is the View for a terminal too small for the sidebar: a
@@ -911,7 +944,9 @@ func (m *Model) compactView() string {
 	if m.set != nil {
 		content = m.settingsView(m.viewport.Width, m.viewport.Height)
 	}
-	return truncate(header, m.width) + "\n" + content + "\n" + m.helpText()
+	top := truncate(header, m.width) + "\n"
+	m.bodyTop = strings.Count(top, "\n")
+	return top + content + "\n" + m.helpText()
 }
 
 // paneName is the title of the summary pane.
@@ -939,7 +974,9 @@ func (m *Model) helpText() string {
 	case m.set != nil:
 		return helpStyle.Render(m.settingsHelpLine(m.width))
 	}
-	return helpStyle.Render(helpLine(m.helpMode(), m.generating, m.width))
+	mode := m.helpMode()
+	line := withMouseNote(helpLine(mode, m.generating, m.width), helpLine(mode, m.generating, math.MaxInt), m.mouse, m.width)
+	return helpStyle.Render(line)
 }
 
 // helpMode is what the help line describes.
@@ -965,9 +1002,25 @@ func paneTitle(s string, focused bool) string {
 	return mutedStyle.Render(s)
 }
 
-// keyLines lists every key in width cells: each description beside the
+// keyLines lists every key in width cells, then, if the mouse is on, what
+// it does and how to select text and open links.
+func keyLines(width int, mouse bool) []string {
+	lines := keyRows(width)
+	if !mouse {
+		return lines
+	}
+	lines = append(lines, "")
+	for _, note := range []string{"mouse: click a topic or highlight to open it; the wheel scrolls", mouseNote} {
+		for _, l := range strings.Split(ansi.Wrap(note, max(1, width), ""), "\n") {
+			lines = append(lines, mutedStyle.Render(l))
+		}
+	}
+	return lines
+}
+
+// keyRows lists every key in width cells: each description beside the
 // key column if they all fit, otherwise on the line under its key.
-func keyLines(width int) []string {
+func keyRows(width int) []string {
 	all := keys.all()
 	col, desc := 0, 0
 	for _, b := range all {
@@ -1001,7 +1054,7 @@ func keyLines(width int) []string {
 // the "more" hint if it doesn't all fit.
 func (m *Model) refreshKeys() {
 	w, h := m.viewport.Width, m.viewport.Height
-	lines := keyLines(w)
+	lines := keyLines(w, m.mouse)
 	m.keysView.Width, m.keysView.Height = w, h
 	if len(lines) > h {
 		m.keysView.Height = max(1, h-1)
@@ -1082,31 +1135,11 @@ func (m *Model) sidebar() string {
 func (m *Model) sidebarView(h int) string {
 	rows := strings.Split(m.sidebar(), "\n")
 	n := len(rows)
+	top, slots := sidebarWindow(n, h, m.sidebarTop, m.selected)
+	m.sidebarTop = top
 	if n <= h {
-		m.sidebarTop = 0
 		return strings.Join(rows, "\n")
 	}
-	// The window holds h rows less a line for each marker; the top row
-	// never goes past what fills the window with only the ↑ marker.
-	top := min(max(0, m.sidebarTop), n-(h-1))
-	var slots int
-	for {
-		slots = h
-		if top > 0 {
-			slots--
-		}
-		if top+slots < n {
-			slots--
-		}
-		if m.selected < top {
-			top = m.selected
-		} else if m.selected >= top+max(1, slots) {
-			top++
-		} else {
-			break
-		}
-	}
-	m.sidebarTop = top
 	var out []string
 	if top > 0 {
 		out = append(out, mutedStyle.Render(fmt.Sprintf("  ↑ %d more", top)))
@@ -1116,6 +1149,37 @@ func (m *Model) sidebarView(h int) string {
 		out = append(out, mutedStyle.Render(fmt.Sprintf("  ↓ %d more", below)))
 	}
 	return strings.Join(out, "\n")
+}
+
+// sidebarWindow is the first of n topic rows the sidebar shows in h
+// lines, scrolled from top so that selected shows, and how many rows it
+// shows: all of them if they fit, else h less a line for each "more"
+// marker.
+func sidebarWindow(n, h, top, selected int) (int, int) {
+	if n <= h {
+		return 0, n
+	}
+	// The top row never goes past what fills the window with only the ↑
+	// marker.
+	top = min(max(0, top), n-(h-1))
+	var slots int
+	for {
+		slots = h
+		if top > 0 {
+			slots--
+		}
+		if top+slots < n {
+			slots--
+		}
+		if selected < top {
+			top = selected
+		} else if selected >= top+max(1, slots) {
+			top++
+		} else {
+			break
+		}
+	}
+	return top, slots
 }
 
 // markUpdates shows items written as updates to news an earlier day

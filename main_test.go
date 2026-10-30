@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -18,24 +19,58 @@ func (quitModel) Init() tea.Cmd                       { return tea.Quit }
 func (quitModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return quitModel{}, nil }
 func (quitModel) View() string                        { return "" }
 
-// The program uses the alternate screen but never captures the mouse, so
-// native text selection always works.
-func TestProgramOptionsLeaveTheMouseAlone(t *testing.T) {
-	var out bytes.Buffer
-	opts := append(programOptions(), tea.WithInput(nil), tea.WithOutput(&out))
-	if _, err := tea.NewProgram(quitModel{}, opts...).Run(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "\x1b[?1049h") {
-		t.Errorf("the program did not enter the alternate screen: %q", out.String())
-	}
+// With the mouse on, the program takes it with cell-motion tracking only
+// (1002, SGR 1006), never all-motion (1003), and gives it back on quit.
+// With it off, it never captures the mouse, so native text selection, OSC 8
+// hover and Cmd-click work as without the TUI.
+func TestProgramOptionsMouse(t *testing.T) {
 	// 1000-1003 turn on mouse tracking; 1005, 1006, 1015 and 1016 its
-	// encodings. Any of them would take the mouse from the terminal, and
-	// with it native selection, OSC 8 hover and Cmd-click.
-	for _, mode := range []string{"\x1b[?1000h", "\x1b[?1001h", "\x1b[?1002h", "\x1b[?1003h",
-		"\x1b[?1005h", "\x1b[?1006h", "\x1b[?1015h", "\x1b[?1016h"} {
-		if strings.Contains(out.String(), mode) {
-			t.Errorf("the program captures the mouse with %q", mode)
+	// encodings.
+	modes := []string{"\x1b[?1000h", "\x1b[?1001h", "\x1b[?1002h", "\x1b[?1003h",
+		"\x1b[?1005h", "\x1b[?1006h", "\x1b[?1015h", "\x1b[?1016h"}
+	for _, mouse := range []bool{true, false} {
+		done := make(chan string, 1)
+		go func() {
+			var out bytes.Buffer
+			opts := append(programOptions(mouse), tea.WithInput(nil), tea.WithOutput(&out))
+			if _, err := tea.NewProgram(quitModel{}, opts...).Run(); err != nil {
+				t.Error(err)
+			}
+			done <- out.String()
+		}()
+		var out string
+		select {
+		case out = <-done:
+		case <-time.After(30 * time.Second):
+			t.Fatalf("mouse %v: the program did not quit", mouse)
+		}
+		if !strings.Contains(out, "\x1b[?1049h") {
+			t.Errorf("mouse %v: the program did not enter the alternate screen: %q", mouse, out)
+		}
+		if !mouse {
+			for _, mode := range modes {
+				if strings.Contains(out, mode) {
+					t.Errorf("mouse off: the program captures the mouse with %q", mode)
+				}
+			}
+			continue
+		}
+		on := strings.LastIndex(out, "\x1b[?1002h")
+		if on < 0 || !strings.Contains(out, "\x1b[?1006h") {
+			t.Errorf("mouse on: no cell-motion tracking in SGR mode: %q", out)
+		}
+		for _, mode := range []string{"\x1b[?1000h", "\x1b[?1001h", "\x1b[?1003h", "\x1b[?1005h", "\x1b[?1015h", "\x1b[?1016h"} {
+			if strings.Contains(out, mode) {
+				t.Errorf("mouse on: the program uses %q", mode)
+			}
+		}
+		// Quitting resets tracking and its encoding, and leaves the
+		// alternate screen.
+		rest := out[max(0, on):]
+		for _, reset := range []string{"\x1b[?1002l", "\x1b[?1006l", "\x1b[?1049l"} {
+			if !strings.Contains(rest, reset) {
+				t.Errorf("mouse on: %q not sent on quit: %q", reset, out)
+			}
 		}
 	}
 }

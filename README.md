@@ -70,10 +70,15 @@ works too. `daily-brief -h` lists everything.
 | `o` | Open the item's source in the browser |
 | `y` | Copy the item and its link |
 | `z` | Reader mode (hide Topics) |
+| `m` | Mouse on/off |
 | `s` `,` | Settings |
 | `r` | Regenerate |
 | `?` | All keys |
 | `q` | Quit (saves topics already done) |
+
+The mouse is on by default: click a topic or highlight to open it, and the
+wheel scrolls. Shift-drag selects text and shift-click opens links (Cmd in
+Ghostty). `m` turns it off for the session, `mouse: false` for good.
 
 ## Configuration
 

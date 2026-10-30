@@ -82,6 +82,10 @@ type Config struct {
 	// Theme is the TUI's colours: auto (GLAMOUR_STYLE if set, else the
 	// terminal's background), dark or light.
 	Theme string `yaml:"theme"`
+	// Mouse lets the TUI take the mouse: a click opens a topic or highlight
+	// and the wheel scrolls, while native selection needs Shift. Unset (nil)
+	// means on; use MouseOn to read it.
+	Mouse *bool `yaml:"mouse,omitempty"`
 	// Location biases search results (e.g. "Lisbon, Portugal"). Optional.
 	Country string `yaml:"country,omitempty"`
 	City    string `yaml:"city,omitempty"`
@@ -108,6 +112,7 @@ func Default() Config {
 		Model:              "claude-opus-5-5",
 		Effort:             "medium",
 		Theme:              "auto",
+		Mouse:              new(true),
 		Topics: []Topic{
 			{Name: "Java & Quarkus", Focus: "OpenJDK releases and JEPs, Quarkus releases and features, Jakarta EE, Spring, GraalVM, notable JVM library updates and ecosystem news."},
 			{Name: "Security", Focus: "Critical or actively exploited CVEs, supply-chain attacks on package registries (Maven Central, npm, PyPI, crates.io), vulnerabilities in programming languages, runtimes, frameworks and developer tools. Say who is affected and what to do."},
@@ -181,6 +186,8 @@ func marshal(cfg Config) ([]byte, error) {
 		"# history_days: earlier days' journals (0-14) whose items are not repeated unless they have a material\n" +
 		"#               new development, then shown as an update; 0 = off.\n" +
 		"# theme: auto (GLAMOUR_STYLE if set, else the terminal's background), dark or light.\n" +
+		"# mouse: true (click a topic or highlight to open it, the wheel scrolls; Shift-drag selects text,\n" +
+		"#        Shift-click opens links, Cmd in Ghostty) or false (the terminal keeps the mouse).\n" +
 		"# price_*: USD prices used only to estimate the cost of API runs.\n" +
 		"# weight: optional per-topic multiplier for its share of the budget.\n" +
 		"# profile: optional, about you (at most 500 characters): items that affect it rank higher and say how, e.g.\n" +
@@ -228,6 +235,16 @@ func (c *Config) Clean() {
 		}
 	}
 	c.Mute = mute
+	if c.Mouse == nil {
+		// An unset (or null) mouse is on.
+		c.Mouse = new(true)
+	}
+}
+
+// MouseOn reports whether the TUI takes the mouse: true unless mouse is
+// set to false.
+func (c Config) MouseOn() bool {
+	return c.Mouse == nil || *c.Mouse
 }
 
 // stripControls removes control and invisible characters from a one-line

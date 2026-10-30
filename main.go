@@ -135,7 +135,8 @@ func run() error {
 			return name
 		},
 	})
-	_, err = tea.NewProgram(m, programOptions()...).Run()
+	m.WithMouse(cfg.MouseOn())
+	_, err = tea.NewProgram(m, programOptions(cfg.MouseOn())...).Run()
 	return err
 }
 
@@ -205,12 +206,19 @@ func resolveTheme(theme string) string {
 	return theme
 }
 
-// programOptions leaves the mouse to the terminal, so text can always be
-// selected and copied natively; in the alternate screen, terminals send
-// the wheel as arrow keys, which scroll the focused Summary pane. Output
-// goes through tui.Output, which the copy key's OSC 52 shares.
-func programOptions() []tea.ProgramOption {
-	return []tea.ProgramOption{tea.WithAltScreen(), tea.WithOutput(tui.Output)}
+// programOptions takes the mouse if mouse is set, with cell-motion
+// tracking (modes 1002 and 1006: clicks, the wheel and drags, never bare
+// motion), so a click opens a topic and the wheel scrolls; native
+// selection then needs Shift. Without it the terminal keeps the mouse, and
+// in the alternate screen sends the wheel as arrow keys, which scroll the
+// focused Summary pane. Output goes through tui.Output, which the copy
+// key's OSC 52 shares.
+func programOptions(mouse bool) []tea.ProgramOption {
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithOutput(tui.Output)}
+	if mouse {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	return opts
 }
 
 // parseArgs parses flags anywhere on the command line, so they may follow

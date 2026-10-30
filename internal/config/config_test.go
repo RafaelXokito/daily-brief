@@ -253,3 +253,55 @@ func TestDefaultConfigDocumentsProfileAndMute(t *testing.T) {
 		t.Errorf("default config reloads with profile %q, mute %q, %v", cfg.Profile, cfg.Mute, err)
 	}
 }
+
+// mouse is on when unset, even as null, off only when set false, and
+// documented in the default config, which writes it.
+func TestMouseDefaultsOn(t *testing.T) {
+	if d := Default(); d.Mouse == nil || !*d.Mouse || !d.MouseOn() {
+		t.Errorf("Default mouse %v", d.Mouse)
+	}
+	if !(Config{}).MouseOn() {
+		t.Error("an unset mouse is off")
+	}
+	for body, want := range map[string]bool{
+		"topics:\n  - name: A\n":                true,
+		"mouse:\ntopics:\n  - name: A\n":        true,
+		"mouse: null\ntopics:\n  - name: A\n":   true,
+		"mouse: true\ntopics:\n  - name: A\n":   true,
+		"mouse: false\ntopics:\n  - name: A\n":  false,
+		"mouse: off\ntopics:\n  - name: A\n":    false, // yaml.v3 reads YAML 1.1's off as false
+		"mouse: maybe\ntopics:\n  - name: A\n":  true,  // refused below
+		"provider: aws\ntopics:\n  - name: A\n": true,
+	} {
+		cfg, err := loadYAML(t, body)
+		if strings.Contains(body, "mouse: maybe") {
+			if err == nil {
+				t.Errorf("mouse: maybe accepted")
+			}
+			continue
+		}
+		if err != nil || cfg.Mouse == nil || cfg.MouseOn() != want {
+			t.Errorf("%q: mouse %v (%v), want %v", body, cfg.Mouse, err, want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# mouse:", "Shift-drag", "\nmouse: true\n"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("default config lacks %q:\n%s", want, data)
+		}
+	}
+	// Clone shares no pointer with the original.
+	c := Default()
+	cl := c.Clone()
+	*cl.Mouse = false
+	if !c.MouseOn() {
+		t.Error("Clone shares mouse")
+	}
+}

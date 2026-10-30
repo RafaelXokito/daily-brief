@@ -427,3 +427,55 @@ func TestValidateBoundsAndCleanText(t *testing.T) {
 		t.Errorf("cleaned model %q, path %q", c.Model, c.Provider.ClaudePath)
 	}
 }
+
+// mouse round-trips through SaveEdits: false is added to a file without
+// it, keeping its comments; on again is written over it; and a file
+// without the key gets none for other edits, as on is the default.
+func TestSaveEditsMouseRoundTrip(t *testing.T) {
+	path, cfg, st := stamped(t, userConfig)
+	if !cfg.MouseOn() {
+		t.Fatal("mouse off without the key")
+	}
+	cfg.TokenBudget = 500_000
+	st, err := SaveEdits(path, st, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Contains(got, "mouse") {
+		t.Errorf("an unchanged default mouse was written:\n%s", got)
+	}
+
+	cfg.Mouse = new(false)
+	if st, err = SaveEdits(path, st, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, path)
+	if !strings.Contains(got, "\nmouse: false\n") || !strings.Contains(got, "my_note: keep me # not a daily-brief key") ||
+		!strings.Contains(got, "# trailing comment") {
+		t.Errorf("mouse: false not added with the file kept:\n%s", got)
+	}
+	if back := mustLoad(t, path); !reflect.DeepEqual(back, cfg) || back.MouseOn() {
+		t.Fatalf("round trip:\n got %+v\nwant %+v", back, cfg)
+	}
+
+	cfg.Mouse = new(true)
+	if _, err = SaveEdits(path, st, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); !strings.Contains(got, "\nmouse: true\n") || strings.Contains(got, "mouse: false") {
+		t.Errorf("mouse on not written:\n%s", got)
+	}
+	if back := mustLoad(t, path); !reflect.DeepEqual(back, cfg) || !back.MouseOn() {
+		t.Fatalf("second round trip:\n got %+v\nwant %+v", back, cfg)
+	}
+
+	// A nil mouse saves as on.
+	path, cfg, st = stamped(t, "mouse: false # mine\ntopics:\n  - name: A\n")
+	cfg.Mouse = nil
+	if _, err = SaveEdits(path, st, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != "mouse: true # mine\ntopics:\n  - name: A\n" {
+		t.Errorf("nil mouse saved as:\n%s", got)
+	}
+}

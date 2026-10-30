@@ -12,7 +12,7 @@ import (
 type keyMap struct {
 	Up, Down, Topics, Summary, Go, Back, Toggle     key.Binding
 	PageDown, PageUp, HalfDown, HalfUp, Top, Bottom key.Binding
-	Jump, Open, Copy, Reader, Settings              key.Binding
+	Jump, Open, Copy, Reader, Mouse, Settings       key.Binding
 	Help, Esc, Regenerate, Quit                     key.Binding
 }
 
@@ -37,6 +37,7 @@ var keys = keyMap{
 	Open:       key.NewBinding(key.WithKeys("o"), key.WithHelp("", "open the item's source")),
 	Copy:       key.NewBinding(key.WithKeys("y"), key.WithHelp("", "copy item and link")),
 	Reader:     key.NewBinding(key.WithKeys("z"), key.WithHelp("", "reader mode on/off")),
+	Mouse:      key.NewBinding(key.WithKeys("m"), key.WithHelp("", "mouse on/off")),
 	Settings:   key.NewBinding(key.WithKeys("s", ","), key.WithHelp("", "settings")),
 	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("", "show/close this help")),
 	Esc:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("", "close help / Topics")),
@@ -47,7 +48,7 @@ var keys = keyMap{
 // all lists the bindings in the order the help overlay shows them.
 func (k keyMap) all() []key.Binding {
 	return []key.Binding{k.Up, k.Down, k.Topics, k.Summary, k.Go, k.Back, k.Toggle, k.PageDown, k.PageUp, k.HalfDown, k.HalfUp,
-		k.Top, k.Bottom, k.Jump, k.Open, k.Copy, k.Reader, k.Settings, k.Help, k.Esc, k.Regenerate, k.Quit}
+		k.Top, k.Bottom, k.Jump, k.Open, k.Copy, k.Reader, k.Mouse, k.Settings, k.Help, k.Esc, k.Regenerate, k.Quit}
 }
 
 // keyName is how the help shows a key.
@@ -154,6 +155,19 @@ func helpLine(mode helpMode, generating bool, width int) string {
 		shown = append(shown, it.String())
 	}
 	return fitHelp(shown, rest, help, width)
+}
+
+// mouseNote is how to select text and open links while the TUI has the
+// mouse.
+const mouseNote = "shift-drag selects · shift-click opens links (Cmd in Ghostty)"
+
+// withMouseNote is the help line line, which is full when it was not cut,
+// followed by mouseNote if the mouse is on and both fit in width cells.
+func withMouseNote(line, full string, mouse bool, width int) string {
+	if note := line + " · " + mouseNote; mouse && line == full && ansi.StringWidth(note) <= width {
+		return note
+	}
+	return line
 }
 
 // overlayHelpLine is the help line while the key list is open: how to

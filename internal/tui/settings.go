@@ -77,7 +77,8 @@ const (
 )
 
 // field is a config key the pane shows; ptr points at its value in a
-// config (a *string, *int, *int64 or *float64).
+// config (a *string, *int, *int64 or *float64, or a **bool for an on/off
+// kindEnum).
 type field struct {
 	key   string
 	kind  fieldKind
@@ -113,6 +114,7 @@ var fields = []field{
 	{key: "effort", kind: kindEnum, opts: []string{"low", "medium", "high", "xhigh", "max"},
 		ptr: func(c *config.Config) any { return &c.Effort }},
 	{key: "theme", kind: kindEnum, opts: []string{"auto", "dark", "light"}, ptr: func(c *config.Config) any { return &c.Theme }},
+	{key: "mouse", kind: kindEnum, opts: []string{"on", "off"}, ptr: func(c *config.Config) any { return &c.Mouse }},
 	{key: "token_budget", kind: kindInt, rng: "0 = auto, or at least 10000", ptr: func(c *config.Config) any { return &c.TokenBudget }},
 	{key: "max_searches_per_topic", kind: kindInt, rng: "0 = auto, or 1-50", ptr: func(c *config.Config) any { return &c.MaxSearchesPerTopic }},
 	{key: "max_read_minutes", kind: kindInt, rng: "1-120", ptr: func(c *config.Config) any { return &c.MaxReadMinutes }},
@@ -169,6 +171,9 @@ type settingsPane struct {
 
 	loaded bool   // saved holds the file as last read
 	theme0 string // the theme shown when the pane opened
+	// mouse0 is the session's mouse setting when the pane opened, or as
+	// last saved or reloaded: what closing without saving goes back to.
+	mouse0 bool
 
 	question string         // the y/n question in setConfirm
 	answer   func() tea.Cmd // what y does
@@ -246,7 +251,7 @@ func (m *Model) openSettings() tea.Cmd {
 	if m.settings.Path == "" {
 		return m.flashMsg("Settings are not available")
 	}
-	m.set = &settingsPane{theme0: m.theme}
+	m.set = &settingsPane{theme0: m.theme, mouse0: m.mouse}
 	m.focus = focusSummary
 	m.loadSettings()
 	return nil
@@ -261,6 +266,11 @@ func (m *Model) loadSettings() bool {
 	changed := st.Sum != p.stamp.Sum
 	p.broken, p.notice, p.inputErr, p.mode = err, "", "", setList
 	if err == nil {
+		if p.loaded && cfg.MouseOn() != p.saved.MouseOn() {
+			// The file's mouse setting changed on disk: it replaces the
+			// session's, as a save of it would.
+			p.mouse0 = cfg.MouseOn()
+		}
 		p.cfg, p.saved, p.stamp, p.loaded = cfg, cfg.Clone(), st, true
 		p.check()
 	} else {
@@ -282,11 +292,13 @@ func (m *Model) showSavedTheme() {
 	}
 }
 
-// closeSettings closes the pane, dropping its edits and any theme being
-// tried.
-func (m *Model) closeSettings() {
+// closeSettings closes the pane, dropping its edits and any theme or
+// mouse setting being tried.
+func (m *Model) closeSettings() tea.Cmd {
 	m.showSavedTheme()
+	mouse := m.set.mouse0
 	m.set = nil
+	return m.applyMouse(mouse)
 }
 
 // applyTheme shows the journal in the configured theme name.
@@ -324,6 +336,11 @@ func (m *Model) saveSettings() tea.Cmd {
 	case err != nil:
 		p.notice = "Not saved: " + err.Error()
 		return nil
+	}
+	if p.cfg.MouseOn() != p.saved.MouseOn() {
+		// Only a saved change of the mouse setting replaces the session's,
+		// which m may have toggled.
+		p.mouse0 = p.cfg.MouseOn()
 	}
 	p.stamp, p.saved, p.notice = st, p.cfg.Clone(), ""
 	return tea.Batch(m.rebuild(p.saved), m.flashMsg("saved · press r to regenerate"))
@@ -421,10 +438,9 @@ func (m *Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p.ask("Discard changes and quit? y/n", m.quit)
 	case key.Matches(msg, keys.Esc, keys.Settings):
 		if !p.dirty() {
-			m.closeSettings()
-			return m, nil
+			return m, m.closeSettings()
 		}
-		p.ask("Discard changes? y/n", func() tea.Cmd { m.closeSettings(); return nil })
+		p.ask("Discard changes? y/n", m.closeSettings)
 	case key.Matches(msg, keys.Up):
 		p.sel = max(0, p.sel-1)
 		p.inputErr = ""
@@ -450,9 +466,9 @@ func (m *Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, reload()
 	case f.kind == kindEnum && key.Matches(msg, settingsKeys.Prev):
-		m.cycle(f, -1)
+		return m, m.cycle(f, -1)
 	case f.kind == kindEnum && key.Matches(msg, settingsKeys.Edit, settingsKeys.Next):
-		m.cycle(f, 1)
+		return m, m.cycle(f, 1)
 	case f.kind == kindTopics && p.broken == nil && key.Matches(msg, settingsKeys.Edit):
 		return m, m.flashMsg("Press e to edit topics in $EDITOR")
 	case f.kind == kindMute && key.Matches(msg, settingsKeys.Edit):
@@ -463,33 +479,40 @@ func (m *Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// reloaded applies a file that changed on disk as a save does.
+// reloaded applies a file that changed on disk as a save does. The
+// session's mouse setting stays unless the file's changed (see
+// loadSettings), dropping one being tried.
 func (m *Model) reloaded(changed bool) tea.Cmd {
 	p := m.set
 	if !changed || p.broken != nil || p.err != nil {
-		return nil
+		return m.applyMouse(p.mouse0)
 	}
-	return tea.Batch(m.rebuild(p.saved), m.flashMsg("reloaded · press r to regenerate"))
+	return tea.Batch(m.applyMouse(p.mouse0), m.rebuild(p.saved), m.flashMsg("reloaded · press r to regenerate"))
 }
 
-// editorDone reloads the file the editor may have changed.
+// editorDone reloads the file the editor may have changed. Bubble Tea
+// turned mouse reporting off to run the editor and does not turn it back
+// on, so it is enabled again whenever the session has the mouse.
 func (m *Model) editorDone(msg editorDoneMsg) tea.Cmd {
-	if m.set == nil {
-		return nil
+	var cmd tea.Cmd
+	if m.set != nil {
+		cmd = m.reloaded(m.loadSettings())
+		if msg.err != nil {
+			m.set.notice = "Editor: " + msg.err.Error()
+		}
 	}
-	cmd := m.reloaded(m.loadSettings())
-	if msg.err != nil {
-		m.set.notice = "Editor: " + msg.err.Error()
+	if m.mouse {
+		cmd = tea.Batch(cmd, tea.EnableMouseCellMotion)
 	}
 	return cmd
 }
 
 // cycle steps an enum field by d through its values.
-func (m *Model) cycle(f field, d int) {
+func (m *Model) cycle(f field, d int) tea.Cmd {
 	p := m.set
-	v := f.ptr(&p.cfg).(*string)
-	i := slices.Index(f.opts, *v)
-	if *v == "" {
+	v := enumValue(f, &p.cfg)
+	i := slices.Index(f.opts, v)
+	if v == "" {
 		i = 0
 	}
 	n := len(f.opts)
@@ -499,18 +522,48 @@ func (m *Model) cycle(f field, d int) {
 			i = 0
 		}
 	}
-	*v = f.opts[((i+d)%n+n)%n]
-	m.committed(f)
+	setEnum(f, &p.cfg, f.opts[((i+d)%n+n)%n])
+	return m.committed(f)
 }
 
-// committed checks the edited config after f changed; the theme shows at
-// once.
-func (m *Model) committed(f field) {
+// enumValue is a kindEnum field's value in c: its string, or on/off for
+// a *bool, where unset is the first option.
+func enumValue(f field, c *config.Config) string {
+	switch v := f.ptr(c).(type) {
+	case **bool:
+		if *v == nil || **v {
+			return f.opts[0]
+		}
+		return f.opts[1]
+	case *string:
+		return *v
+	}
+	return ""
+}
+
+// setEnum sets a kindEnum field in c to opt. A *bool gets a new pointer,
+// never written through, as a config's clone may share it.
+func setEnum(f field, c *config.Config, opt string) {
+	switch v := f.ptr(c).(type) {
+	case **bool:
+		*v = new(opt == f.opts[0])
+	case *string:
+		*v = opt
+	}
+}
+
+// committed checks the edited config after f changed; the theme and the
+// mouse setting apply at once.
+func (m *Model) committed(f field) tea.Cmd {
 	m.set.check()
 	m.set.inputErr = ""
-	if f.key == "theme" {
+	switch f.key {
+	case "theme":
 		m.applyTheme(m.set.cfg.Theme)
+	case "mouse":
+		return m.applyMouse(m.set.cfg.MouseOn())
 	}
+	return nil
 }
 
 func newInput(value string, limit int) textinput.Model {
@@ -727,7 +780,7 @@ func (p *settingsPane) value(f field) (string, bool) {
 	c := &p.cfg
 	switch f.kind {
 	case kindEnum:
-		v := *f.ptr(c).(*string)
+		v := enumValue(f, c)
 		if v == "" {
 			return f.opts[0], false
 		}

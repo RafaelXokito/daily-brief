@@ -52,6 +52,7 @@ token_budget: 0             # tokens per journal: a target and a cap kept by a s
 max_searches_per_topic: 0   # optional cap per research pass; 0 = derived from the budget
 max_read_minutes: 9         # the journal stays short enough to read in this many minutes
 theme: auto                 # auto | dark | light: the TUI's and -print's colours
+mouse: true                 # the TUI takes the mouse (clicks, wheel); false leaves it to the terminal
 history_days: 3             # earlier days' journals not to repeat (0-14); 0 = off
 concurrency: 3              # topics researched in parallel
 model: claude-opus-5-5
@@ -463,10 +464,23 @@ Flags can go before or after a subcommand: `daily-brief budget -budget 1000000`
 and `daily-brief auth status -provider aws` both work.
 
 Keys: the TUI has two panes, Topics and Summary, and starts with Summary
-focused. The focused pane's title is in the accent colour. The TUI never
-captures the mouse, so you can always select and copy text with it; in the
-alternate screen, terminals such as Ghostty, WezTerm and Kitty send the wheel
-as `↑/↓`, which scroll the Summary.
+focused. The focused pane's title is in the accent colour.
+
+Mouse: by default (`mouse: true`) the TUI takes the mouse, with cell-motion
+tracking only (clicks, the wheel and drags, never bare motion). A click on a
+topic opens it, a click on the Summary focuses it, and on the Overview a
+click on a highlight goes to its item as `enter` does. The wheel over Topics
+selects the previous or next topic (stopping at the ends); anywhere else it
+scrolls the Summary. Clicks on borders, the "more" markers, the header and
+the help line do nothing, and while the list of keys or Settings is open
+clicks are ignored (the wheel scrolls the list of keys). As the terminal no
+longer sees plain clicks, select text with Shift-drag and open a link with
+Shift-click (Cmd-click in Ghostty); the help line and the list of keys say
+so. `m` turns the mouse off or on for this session only; the Settings pane's
+`mouse` field changes it at once and `ctrl+s` saves it. With the mouse off,
+the TUI never captures it: you select and copy text and click links as
+usual, and in the alternate screen terminals such as Ghostty, WezTerm and
+Kitty send the wheel as `↑/↓`, which scroll the Summary.
 
 | Key | Action |
 | --- | --- |
@@ -484,6 +498,7 @@ as `↑/↓`, which scroll the Summary.
 | `o` | open the source of the selected highlight's item, the item `enter` went to, or the item at the top of the Summary, in the browser (`open`, or `xdg-open`); only http(s) links are opened, others show "No web link" |
 | `y` | copy that item as plain text, with its link: `pbcopy` on a Mac outside SSH, else OSC 52 (up to about 75 KB); the help line shows "Copied" only once it was sent |
 | `z` | reader mode: hide Topics and use the full width (`z` again, or `←`/`tab`/`esc`, brings Topics back) |
+| `m` | mouse on/off for this session (see Mouse above); `mouse` in Settings saves it |
 | `s` `,` | open the Settings pane (see [Settings](#settings)) |
 | `?` | show or close the list of keys |
 | `esc` | close the list of keys, or focus Topics |
@@ -519,7 +534,7 @@ overrides: provider=aws") and which keep applying to this session's runs.
 | Key | Action |
 | --- | --- |
 | `↑` `k` / `↓` `j` | select a setting |
-| `enter` `→` | edit it; for a choice (provider, auth, effort, theme), the next value |
+| `enter` `→` | edit it; for a choice (provider, auth, effort, theme, mouse), the next value |
 | `←` / `space` | previous / next value of a choice |
 | `enter` / `esc` | take / drop an edit |
 | `a` `x` `enter` | on the mute list: add, delete, edit an entry |
@@ -542,8 +557,9 @@ temporary file renamed over it, with the same mode). If the file changed on
 disk since the pane read it, saving refuses and `R` reloads it. A file of
 several YAML documents, a change to a value shared through a YAML anchor and
 a read-only file are refused too; `e` edits them. Line endings, a byte order
-mark and emoji are kept. A theme change
-shows at once; everything else applies to the next `r`. A run in progress
+mark and emoji are kept. A theme or mouse change
+shows at once (closing without saving drops it); everything else applies
+to the next `r`. A run in progress
 keeps its settings, and nothing starts by itself. If the new settings can't
 connect (say, no API key), the file is still saved and the next run keeps
 the previous connection.
@@ -569,7 +585,9 @@ colour (SGR) sequences and the app's own OSC 8 hyperlinks; any other escape
 sequence, BEL, backspace, carriage return, DEL and C1 is dropped. Only
 http(s) links with a host become OSC 8 hyperlinks, always underlined
 (WezTerm and Kitty highlight the whole title on hover and open it on click;
-in Ghostty you hold Cmd to highlight and Cmd-click to open), without any
+in Ghostty you hold Cmd to highlight and Cmd-click to open; while the TUI
+has the mouse, hold Shift in WezTerm and Kitty, and Cmd still in Ghostty),
+without any
 `user@` part, so
 `https://good.com@evil.com` links to and shows evil.com; a host with control
 or invisible characters is not linked. An inline `[source](…)` link or a
