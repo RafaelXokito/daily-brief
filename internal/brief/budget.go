@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 const (

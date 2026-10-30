@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
 )
 
 func TestViewShowsSectionsAndContent(t *testing.T) {

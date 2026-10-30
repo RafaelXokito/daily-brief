@@ -1,4 +1,4 @@
-module github.com/rafaelpereira/daily-brief
+module github.com/RafaelXokito/daily-brief
 
 go 1.26.4
 

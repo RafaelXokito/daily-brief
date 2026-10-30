@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
 )
 
 // printJournals have highlights, updates, an overshoot, failures and

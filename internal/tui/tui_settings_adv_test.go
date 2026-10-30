@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // advSettingsConfig shows every text field the tests type into: an aws

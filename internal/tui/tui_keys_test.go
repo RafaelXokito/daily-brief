@@ -11,8 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // longMarkdown is about 200 lines, with one line too long to wrap.

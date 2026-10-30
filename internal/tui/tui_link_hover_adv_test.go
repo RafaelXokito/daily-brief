@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
 )
 
 // advTimeout bounds each adversarial test: fn runs on its own goroutine

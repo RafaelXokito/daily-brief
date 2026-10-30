@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 const testProfile = "Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor"

@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // writeDay writes j as date's journal file as is, without SaveJournal's

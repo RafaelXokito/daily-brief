@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
 )
 
 const taggedDigest = "### Widget server flaw exploited\n" +

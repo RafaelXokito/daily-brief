@@ -10,8 +10,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	"github.com/anthropics/anthropic-sdk-go/v2/vertex"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
-	"github.com/rafaelpereira/daily-brief/internal/keychain"
+	"github.com/RafaelXokito/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/keychain"
 )
 
 // Backend is one way of reaching Claude.

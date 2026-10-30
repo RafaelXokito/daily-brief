@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // overviewSpy records the overview's input.

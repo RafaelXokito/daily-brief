@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
 )
 
 // The marker replaces every plain "Update:" heading prefix the prompt asks

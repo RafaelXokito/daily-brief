@@ -13,8 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // settingsConfig is a config file as a user keeps it: comments, a key

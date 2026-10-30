@@ -20,8 +20,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // Settings is what the Settings pane needs from main. Without a Path, s

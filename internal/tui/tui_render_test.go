@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
 )
 
 const longURL = "https://www.theregister.com/2026/10/29/very_long_article_slug_about_quarkus_native_builds_and_graalvm/?utm_source=feed&utm_medium=rss"

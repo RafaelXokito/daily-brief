@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // claudeCodeBackend runs the local Claude Code CLI in print mode, so requests

@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 func TestHeaderShowsUtilizationReadTimeAndLevel(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 // scriptBackend is a fake backend whose research behaviour is scripted per

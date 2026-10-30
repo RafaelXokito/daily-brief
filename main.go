@@ -13,10 +13,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 
-	"github.com/rafaelpereira/daily-brief/internal/brief"
-	"github.com/rafaelpereira/daily-brief/internal/config"
-	"github.com/rafaelpereira/daily-brief/internal/keychain"
-	"github.com/rafaelpereira/daily-brief/internal/tui"
+	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/keychain"
+	"github.com/RafaelXokito/daily-brief/internal/tui"
 )
 
 func main() {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 func TestNewJournalSplitsBudgetByWeight(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/rafaelpereira/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/config"
 )
 
 const researchSystemPrompt = `You are the editor of a short personal morning briefing for a software engineer.
