@@ -479,3 +479,37 @@ func TestSaveEditsMouseRoundTrip(t *testing.T) {
 		t.Errorf("nil mouse saved as:\n%s", got)
 	}
 }
+
+// update_check round-trips through SaveEdits like mouse: the default is
+// not written, false is added keeping the file, and on again replaces it.
+func TestSaveEditsUpdateCheckRoundTrip(t *testing.T) {
+	path, cfg, st := stamped(t, userConfig)
+	cfg.TokenBudget = 500_000
+	st, err := SaveEdits(path, st, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Contains(got, "update_check") {
+		t.Errorf("an unchanged default update_check was written:\n%s", got)
+	}
+	cfg.UpdateCheck = new(false)
+	if st, err = SaveEdits(path, st, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); !strings.Contains(got, "\nupdate_check: false\n") || !strings.Contains(got, "# trailing comment") {
+		t.Errorf("update_check: false not added with the file kept:\n%s", got)
+	}
+	if back := mustLoad(t, path); !reflect.DeepEqual(back, cfg) || back.UpdateCheckOn() {
+		t.Fatalf("round trip:\n got %+v\nwant %+v", back, cfg)
+	}
+	cfg.UpdateCheck = new(true)
+	if _, err = SaveEdits(path, st, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); !strings.Contains(got, "\nupdate_check: true\n") {
+		t.Errorf("update_check on not written:\n%s", got)
+	}
+	if back := mustLoad(t, path); !back.UpdateCheckOn() {
+		t.Error("second round trip off")
+	}
+}

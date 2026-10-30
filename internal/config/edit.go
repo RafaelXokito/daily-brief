@@ -42,6 +42,7 @@ var Hints = map[string]string{
 	"effort":                 "low, medium, high, xhigh or max",
 	"theme":                  "auto (GLAMOUR_STYLE if set, else the terminal's background), dark or light",
 	"mouse":                  "on: click a topic or highlight to open it, wheel scrolls; shift-drag selects, shift-click opens links (Cmd in Ghostty)",
+	"update_check":           "on: once a day, ask api.github.com whether a newer release exists and show it in the header",
 	"token_budget":           "tokens (input + output + search results) each journal aims to spend; 0 = auto",
 	"max_searches_per_topic": "optional cap per research pass; 0 = derived from the budget",
 	"max_read_minutes":       "the journal is kept short enough to read in this many minutes",
@@ -158,6 +159,9 @@ func (c Config) Clone() Config {
 	c.AllTopics = slices.Clone(c.AllTopics)
 	if c.Mouse != nil {
 		c.Mouse = new(*c.Mouse)
+	}
+	if c.UpdateCheck != nil {
+		c.UpdateCheck = new(*c.UpdateCheck)
 	}
 	return c
 }

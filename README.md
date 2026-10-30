@@ -84,6 +84,7 @@ works too. `daily-brief -h` lists everything.
 | `m` | Mouse on/off |
 | `s` `,` | Settings |
 | `r` | Regenerate |
+| `U` | Update, when a newer release is available |
 | `?` | All keys |
 | `q` | Quit (saves topics already done) |
 
@@ -91,6 +92,27 @@ The mouse is on by default: click a topic or highlight to open it, click an
 item to focus it, and the wheel scrolls. Shift-drag selects text and
 shift-click opens links (Cmd in Ghostty). `m` turns it off for the session,
 `mouse: false` for good.
+
+## Updating
+
+```sh
+daily-brief update
+```
+
+This downloads the latest release for your system from GitHub, checks it
+against the release's `checksums.txt`, and replaces the binary. If the
+binary's directory isn't writable, use `sudo daily-brief update` or
+reinstall with `go install`. A build from source or `go install` without a
+version tag can't update itself.
+
+Release builds also check for a newer release when the TUI opens, and show
+`↑ v0.1.1 available · U to update` in the header. `U` (or a click on the
+notice) asks to confirm, then quits and updates.
+
+The check only contacts api.github.com, at most once a day, and sends
+nothing but the version in the User-Agent. Turn it off with
+`update_check: false` in the config (or in Settings), or set
+`DAILY_BRIEF_NO_UPDATE_CHECK=1`. It is also skipped when `CI` is set.
 
 ## Configuration
 

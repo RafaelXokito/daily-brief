@@ -305,3 +305,47 @@ func TestMouseDefaultsOn(t *testing.T) {
 		t.Error("Clone shares mouse")
 	}
 }
+
+// update_check is on when unset or null, off only when set false,
+// documented in the default config, and not shared by a clone.
+func TestUpdateCheckDefaultsOn(t *testing.T) {
+	if d := Default(); d.UpdateCheck == nil || !d.UpdateCheckOn() {
+		t.Errorf("Default update_check %v", d.UpdateCheck)
+	}
+	if !(Config{}).UpdateCheckOn() {
+		t.Error("an unset update_check is off")
+	}
+	for body, want := range map[string]bool{
+		"topics:\n  - name: A\n":                      true,
+		"update_check:\ntopics:\n  - name: A\n":       true,
+		"update_check: true\ntopics:\n  - name: A\n":  true,
+		"update_check: false\ntopics:\n  - name: A\n": false,
+	} {
+		cfg, err := loadYAML(t, body)
+		if err != nil || cfg.UpdateCheck == nil || cfg.UpdateCheckOn() != want {
+			t.Errorf("%q: update_check %v (%v), want %v", body, cfg.UpdateCheck, err, want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# update_check:", "api.github.com", "\nupdate_check: true\n"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("default config lacks %q:\n%s", want, data)
+		}
+	}
+	if Hints["update_check"] == "" {
+		t.Error("no hint for update_check")
+	}
+	c := Default()
+	cl := c.Clone()
+	*cl.UpdateCheck = false
+	if !c.UpdateCheckOn() {
+		t.Error("Clone shares update_check")
+	}
+}

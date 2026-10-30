@@ -53,6 +53,7 @@ max_searches_per_topic: 0   # optional cap per research pass; 0 = derived from t
 max_read_minutes: 9         # the journal stays short enough to read in this many minutes
 theme: auto                 # auto | dark | light: the TUI's and -print's colours
 mouse: true                 # the TUI takes the mouse (clicks, wheel); false leaves it to the terminal
+update_check: true          # once a day, ask api.github.com whether a newer release exists; false = never
 history_days: 3             # earlier days' journals not to repeat (0-14); 0 = off
 concurrency: 3              # topics researched in parallel
 model: claude-opus-5-5
@@ -473,6 +474,7 @@ the prompt really sent, and `daily-brief budget` plans each first request at
 | `daily-brief -topics "AI,Security"` | Research only some topics and merge them into today's journal |
 | `daily-brief -provider anthropic` | Use a different connection for this run |
 | `daily-brief auth set-key` / `delete-key` / `status` | Manage the Keychain API key, check credentials |
+| `daily-brief update` | Install the latest release over this binary (see Updates below) |
 | `daily-brief -print` | Print the journal: rendered as in the TUI on a terminal, Markdown exactly as saved when piped (good for scripts / cron) |
 
 Flags can go before or after a subcommand: `daily-brief budget -budget 1000000`
@@ -520,6 +522,7 @@ Kitty send the wheel as `↑/↓`, which move through a topic's items.
 | `?` | show or close the list of keys |
 | `esc` | close the list of keys, or focus Topics |
 | `r` | regenerate |
+| `U` | when the header offers a newer release: ask to update, then quit and install it |
 | `q` `ctrl+c` | quit |
 
 On the Overview with the Summary focused, `↑/↓` move a cursor over the
@@ -562,6 +565,21 @@ hidden and the header names the topic shown; below 20×4 the TUI only says the
 terminal is too small. With more topics than fit, the Topics pane scrolls to
 keep the selected one in view.
 
+Updates: a release build opening the TUI on a terminal asks the GitHub API
+for the latest release, in the background, at most once a day; the answer
+(or a failure) is cached in `update-check.json` in the data directory. If a
+newer release exists the header ends with `↑ v0.1.1 available · U to update`
+in the warning colour, dropped on a terminal too narrow for it. `U`, or a
+click on the notice, asks "Update to v0.1.1? y/n"; `y` closes the TUI and then runs the
+same update as `daily-brief update` in the foreground; `n` or `esc` cancels. During a run it refuses until
+the run ends. `daily-brief update` downloads the release archive for this
+system and `checksums.txt` over HTTPS from GitHub, checks the archive's
+SHA-256, takes only the `daily-brief` file from it, writes it beside the
+installed binary (following a symlink) and renames it over the old one;
+nothing downloaded is run. The check is off with `update_check: false`,
+`DAILY_BRIEF_NO_UPDATE_CHECK=1`, when `CI` is set, and on development
+builds, which can't update themselves.
+
 ### Settings
 
 `s` (or `,`) opens a Settings pane in place of the Summary; Topics stays.
@@ -572,7 +590,7 @@ overrides: provider=aws") and which keep applying to this session's runs.
 | Key | Action |
 | --- | --- |
 | `↑` `k` / `↓` `j` | select a setting |
-| `enter` `→` | edit it; for a choice (provider, auth, effort, theme, mouse), the next value |
+| `enter` `→` | edit it; for a choice (provider, auth, effort, theme, mouse, update_check), the next value |
 | `←` / `space` | previous / next value of a choice |
 | `enter` / `esc` | take / drop an edit |
 | `a` `x` `enter` | on the mute list: add, delete, edit an entry |

@@ -19,6 +19,7 @@ const (
 	regionTopic                 // a topic row of the Topics pane
 	regionSidebar               // the Topics pane off its topic rows: a "more" marker, the rows below
 	regionSummary               // the Summary pane's body
+	regionNotice                // the header's update notice
 )
 
 // geometry is where View drew the panes, as hitTest needs it.
@@ -29,6 +30,9 @@ type geometry struct {
 	topics     int  // the Topics pane's entries, the Overview first
 	sidebarTop int  // its first entry shown, when they don't all fit
 	selected   int  // the selected entry, which the window keeps in view
+	// notice is the columns [notice[0], notice[1]) of the header's first
+	// row that the update notice covers; empty if it was not drawn.
+	notice [2]int
 }
 
 // hit is what a mouse event at a cell is over: its region and, for
@@ -48,6 +52,7 @@ func (m *Model) geometry() geometry {
 		topics:     len(m.journal.Sections) + 1,
 		sidebarTop: m.sidebarTop,
 		selected:   m.selected,
+		notice:     m.notice,
 	}
 }
 
@@ -57,6 +62,9 @@ func (m *Model) geometry() geometry {
 // g.top. Its topic rows are those sidebarView shows, between its "↑ more"
 // and "↓ more" markers.
 func hitTest(g geometry, x, y int) hit {
+	if y == 0 && x >= g.notice[0] && x < g.notice[1] {
+		return hit{region: regionNotice}
+	}
 	row := y - g.top
 	if g.top < 0 || x < 0 || row < 0 || row >= g.height {
 		return hit{region: regionNone}
@@ -105,7 +113,8 @@ func highlightAt(content string, starts []int, line int) int {
 // click on the Summary focuses it, on the Overview's highlights goes to
 // the one clicked, as enter does, and on a topic's item focuses that item.
 // The wheel moves the selected topic over the Topics pane and scrolls the
-// Summary elsewhere, refocusing an item if the focused one leaves view. While Settings
+// Summary elsewhere, refocusing an item if the focused one leaves view. A
+// click on the header's update notice asks whether to update. While Settings
 // is open clicks and the wheel do nothing; over the list of keys the wheel
 // scrolls it.
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
@@ -125,6 +134,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	switch {
 	case m.set != nil:
 		return nil
+	case wheel == 0 && hitTest(m.geometry(), msg.X, msg.Y).region == regionNotice:
+		return m.promptUpdate()
 	case m.showHelp:
 		if wheel < 0 {
 			m.keysView.ScrollUp(wheelLines)

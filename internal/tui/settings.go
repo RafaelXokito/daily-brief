@@ -115,6 +115,7 @@ var fields = []field{
 		ptr: func(c *config.Config) any { return &c.Effort }},
 	{key: "theme", kind: kindEnum, opts: []string{"auto", "dark", "light"}, ptr: func(c *config.Config) any { return &c.Theme }},
 	{key: "mouse", kind: kindEnum, opts: []string{"on", "off"}, ptr: func(c *config.Config) any { return &c.Mouse }},
+	{key: "update_check", kind: kindEnum, opts: []string{"on", "off"}, ptr: func(c *config.Config) any { return &c.UpdateCheck }},
 	{key: "token_budget", kind: kindInt, rng: "0 = auto, or at least 10000", ptr: func(c *config.Config) any { return &c.TokenBudget }},
 	{key: "max_searches_per_topic", kind: kindInt, rng: "0 = auto, or 1-50", ptr: func(c *config.Config) any { return &c.MaxSearchesPerTopic }},
 	{key: "max_read_minutes", kind: kindInt, rng: "1-120", ptr: func(c *config.Config) any { return &c.MaxReadMinutes }},

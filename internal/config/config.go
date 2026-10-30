@@ -90,6 +90,10 @@ type Config struct {
 	// and the wheel scrolls, while native selection needs Shift. Unset (nil)
 	// means on; use MouseOn to read it.
 	Mouse *bool `yaml:"mouse,omitempty"`
+	// UpdateCheck lets the TUI ask GitHub once a day whether a newer
+	// release exists, and show it in the header. Unset (nil) means on; use
+	// UpdateCheckOn to read it.
+	UpdateCheck *bool `yaml:"update_check,omitempty"`
 	// Location biases search results (e.g. "Lisbon, Portugal"). Optional.
 	Country string `yaml:"country,omitempty"`
 	City    string `yaml:"city,omitempty"`
@@ -123,6 +127,7 @@ func Default() Config {
 		Effort:             "medium",
 		Theme:              "auto",
 		Mouse:              new(true),
+		UpdateCheck:        new(true),
 		Topics: []Topic{
 			{Name: "Java & Quarkus", Focus: "OpenJDK releases and JEPs, Quarkus releases and features, Jakarta EE, Spring, GraalVM, notable JVM library updates and ecosystem news."},
 			{Name: "Security", Focus: "Critical or actively exploited CVEs, supply-chain attacks on package registries (Maven Central, npm, PyPI, crates.io), vulnerabilities in programming languages, runtimes, frameworks and developer tools. Say who is affected and what to do."},
@@ -198,6 +203,8 @@ func marshal(cfg Config) ([]byte, error) {
 		"# theme: auto (GLAMOUR_STYLE if set, else the terminal's background), dark or light.\n" +
 		"# mouse: true (click a topic or highlight to open it, the wheel scrolls; Shift-drag selects text,\n" +
 		"#        Shift-click opens links, Cmd in Ghostty) or false (the terminal keeps the mouse).\n" +
+		"# update_check: true (once a day, ask api.github.com whether a newer release exists and show it in the\n" +
+		"#               header; `daily-brief update` installs it) or false (never check).\n" +
 		"# price_*: USD prices used only to estimate the cost of API runs.\n" +
 		"# weight: optional per-topic multiplier for its share of the budget.\n" +
 		"# profile: optional, about you (at most 500 characters): items that affect it rank higher and say how, e.g.\n" +
@@ -252,12 +259,22 @@ func (c *Config) Clean() {
 		// An unset (or null) mouse is on.
 		c.Mouse = new(true)
 	}
+	if c.UpdateCheck == nil {
+		// An unset (or null) update_check is on.
+		c.UpdateCheck = new(true)
+	}
 }
 
 // MouseOn reports whether the TUI takes the mouse: true unless mouse is
 // set to false.
 func (c Config) MouseOn() bool {
 	return c.Mouse == nil || *c.Mouse
+}
+
+// UpdateCheckOn reports whether the TUI checks for a newer release: true
+// unless update_check is set to false.
+func (c Config) UpdateCheckOn() bool {
+	return c.UpdateCheck == nil || *c.UpdateCheck
 }
 
 // stripControls removes control and invisible characters from a one-line

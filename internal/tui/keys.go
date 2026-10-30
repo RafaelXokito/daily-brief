@@ -13,7 +13,7 @@ type keyMap struct {
 	Up, Down, Topics, Summary, Go, Back, Toggle     key.Binding
 	PageDown, PageUp, HalfDown, HalfUp, Top, Bottom key.Binding
 	Jump, Open, Copy, Reader, Mouse, Settings       key.Binding
-	Help, Esc, Regenerate, Quit                     key.Binding
+	Help, Esc, Regenerate, Update, Quit             key.Binding
 }
 
 // A binding's first key is the one the help line shows. Descriptions are
@@ -42,13 +42,14 @@ var keys = keyMap{
 	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("", "show/close this help")),
 	Esc:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("", "close help / Topics")),
 	Regenerate: key.NewBinding(key.WithKeys("r"), key.WithHelp("", "regenerate the journal")),
+	Update:     key.NewBinding(key.WithKeys("U"), key.WithHelp("", "update (when offered)")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("", "quit (saves progress)")),
 }
 
 // all lists the bindings in the order the help overlay shows them.
 func (k keyMap) all() []key.Binding {
 	return []key.Binding{k.Up, k.Down, k.Topics, k.Summary, k.Go, k.Back, k.Toggle, k.PageDown, k.PageUp, k.HalfDown, k.HalfUp,
-		k.Top, k.Bottom, k.Jump, k.Open, k.Copy, k.Reader, k.Mouse, k.Settings, k.Help, k.Esc, k.Regenerate, k.Quit}
+		k.Top, k.Bottom, k.Jump, k.Open, k.Copy, k.Reader, k.Mouse, k.Settings, k.Help, k.Esc, k.Regenerate, k.Update, k.Quit}
 }
 
 // keyName is how the help shows a key.

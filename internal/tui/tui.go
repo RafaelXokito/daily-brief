@@ -24,6 +24,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/update"
 )
 
 const sidebarWidth = 28
@@ -134,6 +135,78 @@ type Model struct {
 	pending  *brief.Generator
 	rebuilds int
 	building *rebuildJob // the latest rebuild, until Update has its result
+
+	// checkUpdate asks whether a newer release exists (see
+	// WithUpdateCheck); nil means no check. available is the newer
+	// release's tag, shown in the header; askUpdate puts "Update to …?"
+	// in the help line; wantUpdate is the release to install once the
+	// program has quit (see WantUpdate). notice is where View drew the
+	// header's notice, for hitTest.
+	checkUpdate func(context.Context) string
+	stopCheck   context.CancelFunc // cancels the check when the program quits
+	available   string
+	askUpdate   bool
+	wantUpdate  string
+	notice      [2]int
+}
+
+// updateAvailableMsg is the update check's answer: a newer release's tag,
+// or "".
+type updateAvailableMsg string
+
+// WithUpdateCheck has the program run check once at startup, in the
+// background, and offer the newer release it returns in the header.
+func (m *Model) WithUpdateCheck(check func(context.Context) string) *Model {
+	m.checkUpdate = check
+	return m
+}
+
+// WantUpdate is the release the user chose to install, once the program
+// has quit, or "".
+func (m *Model) WantUpdate() string { return m.wantUpdate }
+
+// updateCheck runs the check, if there is one, off the event loop.
+func (m *Model) updateCheck() tea.Cmd {
+	check := m.checkUpdate
+	if check == nil {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.stopCheck = cancel
+	return func() tea.Msg { return updateAvailableMsg(check(ctx)) }
+}
+
+// promptUpdate asks whether to install the release on offer, unless a run
+// is going.
+func (m *Model) promptUpdate() tea.Cmd {
+	switch {
+	case m.available == "":
+		return m.flashMsg("No update available")
+	case m.generating:
+		return m.flashMsg("Finish or wait for the run first, then press U to update")
+	}
+	m.askUpdate = true
+	return nil
+}
+
+// updateKey answers the "Update to …? y/n" question: y quits for main to
+// install it, n or esc cancels, ctrl+c and q quit without updating.
+func (m *Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		m.askUpdate = false
+		if m.generating {
+			return m, m.flashMsg("Finish or wait for the run first, then press U to update")
+		}
+		m.wantUpdate = m.available
+		return m, m.quit()
+	case "n", "N", "esc":
+		m.askUpdate = false
+	case "ctrl+c", "q":
+		m.askUpdate = false
+		return m, m.quit()
+	}
+	return m, nil
 }
 
 // New shows journal if it is non-nil, otherwise generates a fresh one.
@@ -221,9 +294,9 @@ func copyText(text string) error {
 
 func (m *Model) Init() tea.Cmd {
 	if m.journal == nil {
-		return tea.Batch(m.spinner.Tick, m.start())
+		return tea.Batch(m.spinner.Tick, m.updateCheck(), m.start())
 	}
-	return m.spinner.Tick
+	return tea.Batch(m.spinner.Tick, m.updateCheck())
 }
 
 func (m *Model) start() tea.Cmd {
@@ -271,6 +344,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearFlashMsg:
 		if int(msg) == m.flashID {
 			m.flash = ""
+		}
+		return m, nil
+
+	case updateAvailableMsg:
+		if v := string(msg); update.IsRelease(v) {
+			m.available = brief.StripControl(v)
 		}
 		return m, nil
 
@@ -335,6 +414,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // quit cancels a run, saving what it has done, and quits.
 func (m *Model) quit() tea.Cmd {
+	if m.stopCheck != nil {
+		// A check still waiting on GitHub is dropped, not cached.
+		m.stopCheck()
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -347,6 +430,9 @@ func (m *Model) quit() tea.Cmd {
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.set != nil {
 		return m.settingsKey(msg)
+	}
+	if m.askUpdate {
+		return m.updateKey(msg)
 	}
 	if key.Matches(msg, keys.Quit) {
 		return m, m.quit()
@@ -378,6 +464,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.keysView.GotoTop()
 	case key.Matches(msg, keys.Settings):
 		return m, m.openSettings()
+	case key.Matches(msg, keys.Update):
+		return m, m.promptUpdate()
 	case key.Matches(msg, keys.Topics, keys.Esc, keys.Toggle) && m.reader:
 		// The Topics pane is hidden in reader mode: show it again.
 		m.reader = false
@@ -1062,6 +1150,7 @@ func (m *Model) View() string {
 		return ""
 	}
 	m.bodyTop = -1
+	m.notice = [2]int{}
 	switch m.layout() {
 	case layoutCompact:
 		return m.compactView()
@@ -1103,7 +1192,7 @@ func (m *Model) View() string {
 	}
 	title := paneTitle(truncate(m.paneName(), m.viewport.Width), m.focus == focusSummary || m.showHelp || m.set != nil)
 	if m.reader {
-		top := truncate(header, m.width) + "\n\n" + title + "\n"
+		top := m.withNotice(header) + "\n\n" + title + "\n"
 		m.bodyTop = strings.Count(top, "\n")
 		return top + content + "\n" + m.helpText()
 	}
@@ -1113,9 +1202,32 @@ func (m *Model) View() string {
 		" ",
 		content,
 	)
-	top := truncate(header, m.width) + "\n\n" + titles + "\n"
+	top := m.withNotice(header) + "\n\n" + titles + "\n"
 	m.bodyTop = strings.Count(top, "\n")
 	return top + body + "\n" + m.helpText()
+}
+
+// minNoticeHeader is the least of the header kept beside the update
+// notice: "Daily Brief" and the "…" marking the cut.
+const minNoticeHeader = 12
+
+// withNotice is the header line, cut to the width, ending with the update
+// notice when a newer release is on offer: the rest of the header gives
+// way to it, but if not even "Daily Brief" would fit beside it, the
+// notice is left out. It records where the notice is for hitTest.
+func (m *Model) withNotice(header string) string {
+	if m.available == "" {
+		return truncate(header, m.width)
+	}
+	notice := "↑ " + brief.StripControl(m.available) + " available · U to update"
+	room := m.width - ansi.StringWidth(notice) - 2
+	if room < minNoticeHeader {
+		return truncate(header, m.width)
+	}
+	header = truncate(header, room)
+	start := ansi.StringWidth(header) + 2
+	m.notice = [2]int{start, start + ansi.StringWidth(notice)}
+	return header + "  " + warnStyle.Render(notice)
 }
 
 // compactView is the View for a terminal too small for the sidebar: a
@@ -1132,7 +1244,7 @@ func (m *Model) compactView() string {
 	if m.set != nil {
 		content = m.settingsView(m.viewport.Width, m.viewport.Height)
 	}
-	top := truncate(header, m.width) + "\n"
+	top := m.withNotice(header) + "\n"
 	m.bodyTop = strings.Count(top, "\n")
 	return top + content + "\n" + m.helpText()
 }
@@ -1155,6 +1267,8 @@ func (m *Model) paneName() string {
 // flash message in its place.
 func (m *Model) helpText() string {
 	switch {
+	case m.askUpdate:
+		return selStyle.Render(truncate("Update to "+brief.StripControl(m.available)+"? y/n", m.width))
 	case m.flash != "":
 		return titleStyle.Render(truncate(m.flash, m.width))
 	case m.showHelp:

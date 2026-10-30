@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsRelease(t *testing.T) {
 	cases := map[string]bool{
@@ -60,5 +63,24 @@ func TestFormatVersion(t *testing.T) {
 	}
 	if got := formatVersion("(devel)", false); got != "daily-brief dev" {
 		t.Errorf("devel: %q", got)
+	}
+}
+
+// `daily-brief update` on a development build refuses before any request.
+func TestUpdateCommandRefusesDevBuild(t *testing.T) {
+	old := version
+	t.Cleanup(func() { version = old })
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	for _, v := range []string{"", "v0.1.1-rc.1", "0.1.1-SNAPSHOT-abc1234"} {
+		version = v
+		var out strings.Builder
+		err := updateCommand(&out)
+		if err == nil || !strings.Contains(err.Error(), "this is a development build (") ||
+			!strings.HasSuffix(err.Error(), "); install a release to use update") {
+			t.Errorf("version %q: err %v", v, err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("version %q: printed %q", v, out.String())
+		}
 	}
 }

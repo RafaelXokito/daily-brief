@@ -6,10 +6,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"regexp"
+	"os/signal"
 	"runtime/debug"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -19,6 +21,7 @@ import (
 	"github.com/RafaelXokito/daily-brief/internal/config"
 	"github.com/RafaelXokito/daily-brief/internal/keychain"
 	"github.com/RafaelXokito/daily-brief/internal/tui"
+	"github.com/RafaelXokito/daily-brief/internal/update"
 )
 
 // version is the release tag, set at build time by
@@ -39,6 +42,7 @@ const usage = `Usage:
   daily-brief auth set-key     store an Anthropic API key in the macOS Keychain
   daily-brief auth delete-key  remove it
   daily-brief auth status      show which provider and credentials are configured
+  daily-brief update           install the latest release over this binary
   daily-brief version          print the version (same as -version)
 
 Flags:
@@ -63,6 +67,9 @@ func run() error {
 	if *showVer || args[0] == "version" {
 		fmt.Println(versionString())
 		return nil
+	}
+	if args[0] == "update" {
+		return updateCommand(os.Stdout)
 	}
 
 	cfg, created, err := config.Load(*configPath)
@@ -149,8 +156,44 @@ func run() error {
 		},
 	})
 	m.WithMouse(cfg.MouseOn())
-	_, err = tea.NewProgram(m, programOptions(cfg.MouseOn())...).Run()
-	return err
+	// A release asks GitHub, at most once a day, whether a newer one
+	// exists; the TUI shows it and U installs it once the TUI has quit.
+	if cur := buildVersion(); update.ShouldCheck(cur, cfg.UpdateCheckOn()) {
+		if tty, _ := stdoutTerminal(); tty {
+			m.WithUpdateCheck(func(ctx context.Context) string { return update.Check(ctx, cur) })
+		}
+	}
+	if _, err = tea.NewProgram(m, programOptions(cfg.MouseOn())...).Run(); err != nil {
+		return err
+	}
+	if m.WantUpdate() != "" {
+		return updateCommand(os.Stderr)
+	}
+	return nil
+}
+
+// updateCommand is `daily-brief update`: it installs the latest release
+// over this binary, in the foreground, writing progress to out. A
+// development build has no version to compare, so it refuses.
+func updateCommand(out io.Writer) error {
+	cur, release := releaseVersion()
+	if !release {
+		return fmt.Errorf("this is a development build (%s); install a release to use update", strings.Trim(cur, "()"))
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("update: finding this binary: %w", err)
+	}
+	// Ctrl-C, SIGTERM or SIGHUP stops the download and leaves the old
+	// binary in place, its temporary file removed.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+	v, err := update.Apply(ctx, cur, exe, out)
+	if err != nil || v == "" {
+		return err
+	}
+	fmt.Fprintf(out, "Updated %s → %s. Run daily-brief again.\n", cur, v)
+	return nil
 }
 
 // newGenerator connects to the configured provider and plans runs of cfg.
@@ -418,11 +461,9 @@ func buildVersion() string {
 	return "(devel)"
 }
 
-var releaseRE = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
-
 // isRelease reports whether v is a plain release tag like v1.2.3, not a
 // pre-release, pseudo-version, dirty build or "(devel)".
-func isRelease(v string) bool { return releaseRE.MatchString(v) }
+func isRelease(v string) bool { return update.IsRelease(v) }
 
 // releaseVersion returns this binary's version and whether it is a release
 // build, which self-update can compare against the latest release.

@@ -304,6 +304,7 @@ func TestSaveEditsAdvPropertyRoundTrip(t *testing.T) {
 		func(c *Config) { c.Effort = []string{"low", "medium", "high", "xhigh", "max"}[rng.Intn(5)] },
 		func(c *Config) { c.Theme = []string{"auto", "dark", "light"}[rng.Intn(3)] },
 		func(c *Config) { c.Mouse = new(rng.Intn(2) == 0) },
+		func(c *Config) { c.UpdateCheck = new(rng.Intn(2) == 0) },
 		func(c *Config) { c.TokenBudget = []int64{0, 10_000, 400_000, 1 << 40}[rng.Intn(4)] },
 		func(c *Config) { c.MaxSearchesPerTopic = int64(rng.Intn(20)) },
 		func(c *Config) { c.MaxReadMinutes = 5 + rng.Intn(30) },
