@@ -29,8 +29,11 @@ func TestProgramOptionsLeaveTheMouseAlone(t *testing.T) {
 	if !strings.Contains(out.String(), "\x1b[?1049h") {
 		t.Errorf("the program did not enter the alternate screen: %q", out.String())
 	}
-	// 1000, 1002 and 1003 turn on mouse tracking; 1006 its SGR encoding.
-	for _, mode := range []string{"\x1b[?1000h", "\x1b[?1002h", "\x1b[?1003h", "\x1b[?1006h"} {
+	// 1000-1003 turn on mouse tracking; 1005, 1006, 1015 and 1016 its
+	// encodings. Any of them would take the mouse from the terminal, and
+	// with it native selection, OSC 8 hover and Cmd-click.
+	for _, mode := range []string{"\x1b[?1000h", "\x1b[?1001h", "\x1b[?1002h", "\x1b[?1003h",
+		"\x1b[?1005h", "\x1b[?1006h", "\x1b[?1015h", "\x1b[?1016h"} {
 		if strings.Contains(out.String(), mode) {
 			t.Errorf("the program captures the mouse with %q", mode)
 		}

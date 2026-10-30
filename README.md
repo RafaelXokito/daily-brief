@@ -527,8 +527,9 @@ character references that would decode into one, such as `&#27;` or
 rendered output, the Overview's list and `-print` on a terminal keep only
 colour (SGR) sequences and the app's own OSC 8 hyperlinks; any other escape
 sequence, BEL, backspace, carriage return, DEL and C1 is dropped. Only
-http(s) links with a host become OSC 8 hyperlinks (Ghostty, WezTerm and
-Kitty open them on click), without any `user@` part, so
+http(s) links with a host become OSC 8 hyperlinks (WezTerm, Kitty: hover
+underlines, click opens. Ghostty: hold Cmd to highlight, Cmd-click to
+open), without any `user@` part, so
 `https://good.com@evil.com` links to and shows evil.com; a host with control
 or invisible characters is not linked. An inline `[source](…)` link or a
 bare URL shows as `↗ domain` (without `www.`), or `↗ link`, any other link
@@ -541,7 +542,11 @@ in full. Each link is replaced by a placeholder of its text's width, made of
 private-use characters removed from the Markdown beforehand, before glamour
 wraps the text and restored after, so a link never breaks across lines; one
 too long for a line is hard-wrapped with its hyperlink closed and reopened
-on each line. Notes and warnings keep their `│` bar on every line
+on each line. A title's words, and the spaces between them, are one
+hyperlink on each line it spans, opened and closed once there with the
+same id and URI on every line, so the terminal highlights the whole title
+on hover rather than one word. Notes and warnings keep their `│` bar on
+every line
 they wrap to, and no line is wider than the pane. This is display only: the
 saved Markdown is unchanged. The Overview with highlights is drawn by the
 TUI itself, so each highlight is a known set of lines.

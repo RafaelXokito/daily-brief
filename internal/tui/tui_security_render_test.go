@@ -148,7 +148,7 @@ func TestHostileCorpusOnlySGRAndOSC8(t *testing.T) {
 // termSafe keeps SGR and our OSC 8 links and removes every other
 // sequence and control character, without swallowing newlines.
 func TestTermSafe(t *testing.T) {
-	link := hyperlink("https://ok.example/x", "ok", 3)
+	link := linkStart("https://ok.example/x", 3) + underlineOn + "ok" + underlineOff + linkEnd
 	for _, c := range []struct{ in, want string }{
 		{"\x1b[1;38;5;12mbold\x1b[0m", "\x1b[1;38;5;12mbold\x1b[0m"},
 		{link, link},

@@ -338,7 +338,8 @@ func barred(md string, width int, theme string) string {
 
 // fitLines hard-wraps any line wider than width, a last resort for words
 // longer than a line, and closes a hyperlink open at the end of a line,
-// reopening it on the next, so no line leaves one open.
+// reopening it, underlined, on the next with the same sequence, so no line
+// leaves one or its underline open.
 func fitLines(s string, width int) string {
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {
@@ -349,17 +350,23 @@ func fitLines(s string, width int) string {
 	lines = strings.Split(strings.Join(lines, "\n"), "\n")
 	open := ""
 	for i, l := range lines {
-		l = open + l
+		if open != "" {
+			l = open + underlineOn + l
+		}
 		open = openLink(l)
 		if open != "" {
-			l += linkEnd
+			l += underlineOff + linkEnd
 		}
 		lines[i] = l
 	}
 	return strings.Join(lines, "\n")
 }
 
-const linkEnd = "\x1b]8;;\x1b\\"
+const (
+	linkEnd      = "\x1b]8;;\x1b\\"
+	underlineOn  = "\x1b[4m"
+	underlineOff = "\x1b[24m"
+)
 
 var osc8RE = regexp.MustCompile(`\x1b\]8;[^;\x1b]*;[^\x1b]*\x1b\\`)
 
@@ -382,6 +389,10 @@ type link struct {
 	token, url, text string
 	id               int
 	style            *lipgloss.Style // for styled text, which has no url
+	// pad is how many cells narrower text is than token, which is at
+	// least three wide: restore adds as many spaces to the line (see
+	// there), so it keeps the width glamour laid out.
+	pad int
 }
 
 type links []link
@@ -393,16 +404,41 @@ var sgrRE = regexp.MustCompile(`^\x1b\[[0-9;:]*m`)
 // and styled text in its style. Styled text ends by resetting the
 // terminal's style, so the SGR sequence that preceded it on its line is
 // repeated after it, for the rest of a heading to stay bold.
+//
+// A titled link's tokens that follow one another on a line, with only
+// spaces and SGR sequences between them, make one hyperlink: it opens
+// once, before the first, holds the spaces, underlined, and closes once,
+// after the last. Terminals that group a link by its opening sequence,
+// as WezTerm does, then highlight the whole title on hover. The underline
+// is set again after each SGR sequence between the tokens, since one may
+// reset it, and turned off before the link closes, so neither leaks into
+// the text after it.
+//
+// Text narrower than its token leaves the line short of the width
+// glamour laid out by the difference, its pad. That many spaces are added
+// at the start of the next run of two or more spaces after it on the
+// line, or else at the line's end: where glamour pads a paragraph's line
+// or a table's cell, which then end where they would with the title in
+// place of the token, as do the column separators after them. The words
+// in between move left, to where they are with plain text.
 func (ls links) restore(s string) string {
 	if len(ls) == 0 {
 		return s
 	}
 	var b strings.Builder
 	sgr := ""
+	pad := 0 // spaces owed to the line
+	flush := func() {
+		b.WriteString(strings.Repeat(" ", pad))
+		pad = 0
+	}
 	for i := 0; i < len(s); {
 		switch {
 		case s[i] == '\n':
 			sgr = ""
+			flush()
+		case s[i] == ' ' && pad > 0 && spaceNext(s[i+1:]):
+			flush()
 		case s[i] == '\x1b':
 			if m := sgrRE.FindString(s[i:]); m != "" {
 				sgr = m
@@ -411,23 +447,84 @@ func (ls links) restore(s string) string {
 				continue
 			}
 		case strings.HasPrefix(s[i:], string(tokStart)):
-			if l, ok := ls.at(s[i:]); ok {
-				if l.style != nil {
-					b.WriteString(l.style.Render(l.text))
-					if sgr != "" && sgr != "\x1b[0m" && sgr != "\x1b[m" {
-						b.WriteString(sgr)
-					}
-				} else {
-					b.WriteString(hyperlink(l.url, l.text, l.id))
+			l, ok := ls.at(s[i:])
+			if !ok {
+				break // not a token: leaves the switch to write the byte as is
+			}
+			i += len(l.token)
+			if l.style != nil {
+				b.WriteString(l.style.Render(l.text))
+				if sgr != "" && sgr != "\x1b[0m" && sgr != "\x1b[m" {
+					b.WriteString(sgr)
 				}
-				i += len(l.token)
+				pad += l.pad
 				continue
 			}
+			b.WriteString(linkStart(l.url, l.id) + underlineOn + l.text)
+			pad += l.pad
+			for {
+				gap, next, ok := ls.continued(s[i:], l)
+				if !ok {
+					break
+				}
+				for j := 0; j < gap; {
+					if m := sgrRE.FindString(s[i+j : i+gap]); m != "" {
+						sgr = m
+						b.WriteString(m + underlineOn)
+						j += len(m)
+						continue
+					}
+					b.WriteByte(s[i+j]) // a space
+					j++
+				}
+				b.WriteString(next.text)
+				pad += next.pad
+				i += gap + len(next.token)
+			}
+			b.WriteString(underlineOff + linkEnd)
+			continue
 		}
 		b.WriteByte(s[i])
 		i++
 	}
+	flush()
 	return b.String()
+}
+
+// spaceNext reports whether s, after SGR sequences, starts with a space.
+func spaceNext(s string) bool {
+	for {
+		m := sgrRE.FindString(s)
+		if m == "" {
+			return strings.HasPrefix(s, " ")
+		}
+		s = s[len(m):]
+	}
+}
+
+// continued reports whether s, the text after a token of l, holds only
+// spaces and SGR sequences, the first gap bytes of it, before another
+// token of the same hyperlink, next.
+func (ls links) continued(s string, l link) (gap int, next link, ok bool) {
+	for gap < len(s) {
+		if s[gap] == ' ' {
+			gap++
+			continue
+		}
+		if m := sgrRE.FindString(s[gap:]); m != "" {
+			gap += len(m)
+			continue
+		}
+		break
+	}
+	if !strings.HasPrefix(s[gap:], string(tokStart)) {
+		return 0, link{}, false
+	}
+	next, ok = ls.at(s[gap:])
+	if !ok || next.style != nil || next.id != l.id || next.url != l.url {
+		return 0, link{}, false
+	}
+	return gap, next, true
 }
 
 // at is the link whose token s starts with.
@@ -441,10 +538,12 @@ func (ls links) at(s string) (link, bool) {
 	return ls[k], true
 }
 
-// hyperlink is text linked to url, a URL from brief.SafeWebURL, with OSC
-// 8; parts of one link share an id so terminals highlight them together.
-func hyperlink(url, text string, id int) string {
-	return fmt.Sprintf("\x1b]8;id=db%d;%s\x1b\\\x1b[4m%s\x1b[24m"+linkEnd, id, url, text)
+// linkStart opens an OSC 8 hyperlink to url. The parts of one link, on
+// the lines it wraps to, open it with the same sequence, so terminals
+// highlight them together: Ghostty and Kitty by id and URI, WezTerm by
+// the sequence itself.
+func linkStart(url string, id int) string {
+	return fmt.Sprintf("\x1b]8;id=db%d;%s\x1b\\", id, url)
 }
 
 var (
@@ -464,7 +563,7 @@ var (
 // and a small heading, and the impact tag on each line tags lists as a
 // badge (see tagLine): no other line, so never one in a code block or a
 // tag brief does not count; the lines items lists are marked with itemMark. Each http(s)
-// link becomes placeholder tokens of the width of its text: "↗ domain"
+// link becomes placeholder tokens no narrower than its text: "↗ domain"
 // for [source](url) links and bare URLs, its title for others, and
 // "title · domain" in the Sources list; other links show as their title
 // alone, and never as a URL. Tokens hold no spaces, so glamour never
@@ -478,6 +577,8 @@ func preRender(md string, width int, theme string, items []int, tags map[int]boo
 		l.token = string(tokStart) + strconv.Itoa(len(ls)) + string(tokEnd)
 		if w, n := lipgloss.Width(l.text), lipgloss.Width(l.token); w > n {
 			l.token += strings.Repeat(string(tokPad), w-n)
+		} else {
+			l.pad = n - w
 		}
 		ls = append(ls, l)
 		return l.token

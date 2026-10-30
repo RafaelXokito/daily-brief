@@ -220,7 +220,7 @@ func TestAdv_RenderTextLikeOldPlaceholders(t *testing.T) {
 // A hyperlink hard-wrapped across lines is closed at the end of each line
 // and reopened on the next.
 func TestAdv_FitLinesKeepsOSC8Balanced(t *testing.T) {
-	out := fitLines(" x "+hyperlink("https://a.example/x", strings.Repeat("w", 50), 0)+" end", 12)
+	out := fitLines(" x "+linkStart("https://a.example/x", 0)+underlineOn+strings.Repeat("w", 50)+underlineOff+linkEnd+" end", 12)
 	if issues := escapeIssues(out); len(issues) > 0 || strings.Count(out, "\n") < 4 {
 		t.Errorf("%q: %v", out, issues)
 	}
