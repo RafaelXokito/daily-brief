@@ -468,10 +468,12 @@ focused. The focused pane's title is in the accent colour.
 
 Mouse: by default (`mouse: true`) the TUI takes the mouse, with cell-motion
 tracking only (clicks, the wheel and drags, never bare motion). A click on a
-topic opens it, a click on the Summary focuses it, and on the Overview a
-click on a highlight goes to its item as `enter` does. The wheel over Topics
-selects the previous or next topic (stopping at the ends); anywhere else it
-scrolls the Summary. Clicks on borders, the "more" markers, the header and
+topic opens it, a click on the Summary focuses it, on the Overview a click
+on a highlight goes to its item as `enter` does, and in a topic a click on
+an item's lines focuses that item (a click on a heading, Related or the
+Sources only focuses the pane). The wheel over Topics selects the previous
+or next topic (stopping at the ends); anywhere else it scrolls the Summary,
+like paging (see below). Clicks on borders, the "more" markers, the header and
 the help line do nothing, and while the list of keys or Settings is open
 clicks are ignored (the wheel scrolls the list of keys). As the terminal no
 longer sees plain clicks, select text with Shift-drag and open a link with
@@ -480,7 +482,7 @@ so. `m` turns the mouse off or on for this session only; the Settings pane's
 `mouse` field changes it at once and `ctrl+s` saves it. With the mouse off,
 the TUI never captures it: you select and copy text and click links as
 usual, and in the alternate screen terminals such as Ghostty, WezTerm and
-Kitty send the wheel as `↑/↓`, which scroll the Summary.
+Kitty send the wheel as `↑/↓`, which move through a topic's items.
 
 | Key | Action |
 | --- | --- |
@@ -489,13 +491,13 @@ Kitty send the wheel as `↑/↓`, which scroll the Summary.
 | `enter` | Topics: focus Summary. Overview: go to the selected highlight |
 | `⌫` (backspace) | back to the Overview, with the same highlight selected |
 | `tab` `shift+tab` | switch pane |
-| `↑` `k` / `↓` `j` | Topics: previous / next topic (wraps; doesn't leave Topics). Overview: previous / next highlight. Summary: scroll a line |
+| `↑` `k` / `↓` `j` | Topics: previous / next topic (wraps; doesn't leave Topics). Overview: previous / next highlight. A topic: previous / next item (see below). Overview without highlights: scroll a line |
 | `space` `pgdown` `f` `shift+↓` | page down |
 | `b` `pgup` `shift+↑` | page up |
 | `d` `ctrl+d` / `u` `ctrl+u` | half page down / up |
 | `g` `home` / `G` `end` | top / bottom |
 | `1`–`9` | jump to the section at that position (`1` = Overview) |
-| `o` | open the source of the selected highlight's item, the item `enter` went to, or the item at the top of the Summary, in the browser (`open`, or `xdg-open`); only http(s) links are opened, others show "No web link" |
+| `o` | open the source of the selected highlight's item, or of the topic's focused item, in the browser (`open`, or `xdg-open`); only http(s) links are opened, others show "No web link" |
 | `y` | copy that item as plain text, with its link: `pbcopy` on a Mac outside SSH, else OSC 52 (up to about 75 KB); the help line shows "Copied" only once it was sent |
 | `z` | reader mode: hide Topics and use the full width (`z` again, or `←`/`tab`/`esc`, brings Topics back) |
 | `m` | mouse on/off for this session (see Mouse above); `mouse` in Settings saves it |
@@ -511,6 +513,27 @@ a muted why and its topic) and `enter` opens that topic scrolled to the
 item's heading, found by its exact headline among the item headings, or at
 the top if the item is no longer there. Paging still
 scrolls. `b` stays page up; `⌫` goes back.
+
+In a topic, `↑/↓` move item by item. The focused item has a bar (`▎` in
+the accent colour, `>` without colours) in the left margin of each of its
+lines, also in reader mode. `↓` focuses the next item and scrolls just
+enough to show its start and as much of it as fits; an item taller than the
+Summary scrolls a line per `↓` until its end shows, and only then does focus
+move on. `↑` mirrors it: a line at a time while the item's start is above
+the top, then the previous item; at the first item it keeps scrolling a
+line at a time up to the top. Past the last item `↓` keeps scrolling, so Related and the Sources
+stay reachable; focus never lands on headings, Related or the Sources. Each
+topic remembers its focused item, so going back to it shows the same one,
+and resizing keeps it. `o` and `y` act on the focused item however the
+Summary was scrolled, and `enter` on a highlight focuses its item. Paging
+(`space`, `b`, `pgdn`, `pgup`, `d`, `u`, `g`, `G`) and the wheel scroll
+freely; if the focused item is then entirely out of view, the first item
+at least partly in view is focused, or, with none in view (say, in the
+Sources), the nearest item above, else the nearest below. Resizing or
+reader mode keeps a focused item in view where it was, and otherwise
+leaves the scroll position alone. The focus is remembered by topic name and
+headline, so it survives a new run that reorders topics or items; if the
+headline is gone, the first item is focused.
 
 The scrolling keys work in either pane, and every key except `r` works while a
 journal is being generated (`r` waits for the run to finish). Quitting mid-run

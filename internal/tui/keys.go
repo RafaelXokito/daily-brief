@@ -20,8 +20,8 @@ type keyMap struct {
 // at most 22 cells, so that at 80 columns they fit beside the widest key
 // column, and in a narrow pane on the line under their key.
 var keys = keyMap{
-	Up:         key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("", "prev topic/line/item")),
-	Down:       key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("", "next topic/line/item")),
+	Up:         key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("", "prev topic/item/line")),
+	Down:       key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("", "next topic/item/line")),
 	Topics:     key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("", "focus Topics")),
 	Summary:    key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("", "focus Summary to read")),
 	Go:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("", "read / go to highlight")),
@@ -118,6 +118,7 @@ const (
 func helpLine(mode helpMode, generating bool, width int) string {
 	var (
 		scroll = helpItem{"scroll", []key.Binding{keys.Up, keys.Down}}
+		item   = helpItem{"item", []key.Binding{keys.Up, keys.Down}}
 		page   = helpItem{"page", []key.Binding{keys.PageDown, keys.PageUp}}
 		topics = helpItem{"topics", []key.Binding{keys.Topics}}
 		open   = helpItem{"open", []key.Binding{keys.Open}}
@@ -131,9 +132,9 @@ func helpLine(mode helpMode, generating bool, width int) string {
 	case modeHighlights:
 		items = []helpItem{{"highlight", []key.Binding{keys.Up, keys.Down}}, {"go", []key.Binding{keys.Go}}, open, yank, topics, reader}
 	case modeItems:
-		items = []helpItem{scroll, page, open, yank, topics, reader}
+		items = []helpItem{item, page, open, yank, topics, reader}
 	case modeItemsBack:
-		items = []helpItem{scroll, page, {"back", []key.Binding{keys.Back}}, open, yank, topics, reader}
+		items = []helpItem{item, page, {"back", []key.Binding{keys.Back}}, open, yank, topics, reader}
 	default:
 		items = []helpItem{scroll, page, topics, reader}
 	}

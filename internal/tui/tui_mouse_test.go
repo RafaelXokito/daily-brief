@@ -319,9 +319,9 @@ func TestClickHighlightJumps(t *testing.T) {
 			t.Errorf("click between highlights: selected %d, focus %d", m.selected, m.focus)
 		}
 		m.Update(click(x+4, y+1)) // its why line
-		if m.selected != want.selected || m.current().Topic != "Security" || m.item != want.item || m.viewport.YOffset != want.viewport.YOffset {
+		if m.selected != want.selected || m.current().Topic != "Security" || m.focusPos() != want.focusPos() || m.viewport.YOffset != want.viewport.YOffset {
 			t.Errorf("click: selected %d item %d offset %d, enter: %d %d %d",
-				m.selected, m.item, m.viewport.YOffset, want.selected, want.item, want.viewport.YOffset)
+				m.selected, m.focusPos(), m.viewport.YOffset, want.selected, want.focusPos(), want.viewport.YOffset)
 		}
 
 		// Scrolled, the click still maps through the viewport's offset.
@@ -335,8 +335,8 @@ func TestClickHighlightJumps(t *testing.T) {
 			return
 		}
 		s.Update(click(x+4, y))
-		if s.current().Topic != "Java & Quarkus" || s.item < 0 {
-			t.Errorf("scrolled click: %q item %d", s.current().Topic, s.item)
+		if it, ok := s.currentItem(); s.current().Topic != "Java & Quarkus" || !ok || !strings.HasPrefix(it.Headline, "Kotlin 2.3") {
+			t.Errorf("scrolled click: %q item %q", s.current().Topic, it.Headline)
 		}
 	})
 }

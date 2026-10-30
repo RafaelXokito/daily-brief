@@ -62,13 +62,13 @@ works too. `daily-brief -h` lists everything.
 
 | Key | Action |
 | --- | --- |
-| `↑` `k` / `↓` `j` | Previous / next topic, highlight or line |
+| `↑` `k` / `↓` `j` | Previous / next topic, highlight or item (long items scroll first) |
 | `←` `h` / `→` `l` | Focus Topics / Summary |
 | `tab` | Switch pane |
 | `enter` | Read the topic, or go to the selected highlight |
 | `space` / `b` | Page down / up |
-| `o` | Open the item's source in the browser |
-| `y` | Copy the item and its link |
+| `o` | Open the focused item's source in the browser |
+| `y` | Copy the focused item and its link |
 | `z` | Reader mode (hide Topics) |
 | `m` | Mouse on/off |
 | `s` `,` | Settings |
@@ -76,9 +76,10 @@ works too. `daily-brief -h` lists everything.
 | `?` | All keys |
 | `q` | Quit (saves topics already done) |
 
-The mouse is on by default: click a topic or highlight to open it, and the
-wheel scrolls. Shift-drag selects text and shift-click opens links (Cmd in
-Ghostty). `m` turns it off for the session, `mouse: false` for good.
+The mouse is on by default: click a topic or highlight to open it, click an
+item to focus it, and the wheel scrolls. Shift-drag selects text and
+shift-click opens links (Cmd in Ghostty). `m` turns it off for the session,
+`mouse: false` for good.
 
 ## Configuration
 

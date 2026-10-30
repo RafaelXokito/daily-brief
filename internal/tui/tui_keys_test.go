@@ -279,8 +279,8 @@ func TestHelpLineFollowsFocusAndViewFits(t *testing.T) {
 		modeTopics:     "↑/↓ topic · → read · space/b page · z reader · ? help · s settings · r regenerate · q quit",
 		modeSummary:    "↑/↓ scroll · space/b page · ← topics · z reader · ? help · s settings · r regenerate · q quit",
 		modeHighlights: "↑/↓ highlight · enter go · o open · y copy · ← topics · z reader · ? help · s settings · r regenerate · q quit",
-		modeItems:      "↑/↓ scroll · space/b page · o open · y copy · ← topics · z reader · ? help · s settings · r regenerate · q quit",
-		modeItemsBack:  "↑/↓ scroll · space/b page · ⌫ back · o open · y copy · ← topics · z reader · ? help · s settings · r regenerate · q quit",
+		modeItems:      "↑/↓ item · space/b page · o open · y copy · ← topics · z reader · ? help · s settings · r regenerate · q quit",
+		modeItemsBack:  "↑/↓ item · space/b page · ⌫ back · o open · y copy · ← topics · z reader · ? help · s settings · r regenerate · q quit",
 	} {
 		if l := helpLine(mode, false, 200); l != want {
 			t.Errorf("help line %d: %q, want %q", mode, l, want)

@@ -110,12 +110,15 @@ type Model struct {
 	cursor  int
 	hlLines []int
 	// headings are where a topic's items and other headings start in
-	// content; item is the item Enter jumped to, or -1, while the viewport
-	// stays at itemAt.
-	headings     []heading
-	item, itemAt int
-	flash        string // replaces the help line for a moment
-	flashID      int
+	// content, and where its items end; itemFocus is the headline of the
+	// focused item of each topic, by topic name, which ↑/↓ move and o/y
+	// act on (the first item if the topic has none or no longer has it).
+	// Names and headlines, not indexes, so a journal replaced by a run
+	// whose topics or items come in another order keeps the focus.
+	headings  []heading
+	itemFocus map[string]string
+	flash     string // replaces the help line for a moment
+	flashID   int
 
 	// open opens a URL in the browser, copy puts text on the clipboard and
 	// editor runs $EDITOR on a file; tests replace them.
@@ -140,7 +143,7 @@ type Model struct {
 func New(gen *brief.Generator, genErr error, journal *brief.Journal, theme string) *Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(accent)
-	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, theme: theme, item: -1, bodyTop: -1,
+	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, theme: theme, bodyTop: -1, itemFocus: map[string]string{},
 		open: openURL, copy: copyText, editor: openEditor}
 }
 
@@ -228,6 +231,7 @@ func (m *Model) start() tea.Cmd {
 	m.cancel = cancel
 	m.running = m.gen.NewJournal()
 	m.journal = cloneJournal(m.running)
+	m.itemFocus = map[string]string{}
 	m.updates = make(chan brief.Update, 16)
 	m.generating = true
 	m.status = "Researching today's news…"
@@ -306,6 +310,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = ""
 		}
 		m.journal = cloneJournal(m.running)
+		if m.selected > len(m.journal.Sections) {
+			m.selected = 0
+		}
 		m.refresh()
 		return m, nil
 
@@ -393,6 +400,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectSection(m.selected - 1)
 		case list:
 			m.moveCursor(-1)
+		case m.onItems():
+			m.itemUp()
 		default:
 			m.viewport.ScrollUp(1)
 		}
@@ -402,21 +411,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectSection(m.selected + 1)
 		case list:
 			m.moveCursor(1)
+		case m.onItems():
+			m.itemDown()
 		default:
 			m.viewport.ScrollDown(1)
 		}
 	case key.Matches(msg, keys.PageDown):
 		m.viewport.PageDown()
+		m.reanchor()
 	case key.Matches(msg, keys.PageUp):
 		m.viewport.PageUp()
+		m.reanchor()
 	case key.Matches(msg, keys.HalfDown):
 		m.viewport.HalfPageDown()
+		m.reanchor()
 	case key.Matches(msg, keys.HalfUp):
 		m.viewport.HalfPageUp()
+		m.reanchor()
 	case key.Matches(msg, keys.Top):
 		m.viewport.GotoTop()
+		m.reanchor()
 	case key.Matches(msg, keys.Bottom):
 		m.viewport.GotoBottom()
+		m.reanchor()
 	case key.Matches(msg, keys.Jump):
 		if i := int(msg.String()[0] - '1'); i <= len(m.journal.Sections) {
 			m.selectSection(i)
@@ -504,11 +521,20 @@ func (m *Model) resize() {
 	} else {
 		m.viewport.Width, m.viewport.Height = w, h
 	}
+	// A focused item in view stays where it was in the viewport, as near
+	// as the new wrapping allows: its line at the top is still at the top.
+	// Otherwise, as past the last item, the offset stays as it was.
+	rel, anchored := 0, false
+	if k := m.focusPos(); k >= 0 && m.inView(m.itemHeadings()[k]) {
+		h := m.itemHeadings()[k]
+		rel, anchored = m.viewport.YOffset-h.line, true
+		rel = min(rel, h.end-h.line)
+	}
 	m.refresh()
 	m.refreshKeys()
-	if line := m.itemLine(m.item); line >= 0 {
-		m.viewport.SetYOffset(line)
-		m.itemAt = m.viewport.YOffset
+	if k := m.focusPos(); anchored && k >= 0 {
+		h := m.itemHeadings()[k]
+		m.viewport.SetYOffset(max(0, h.line+min(rel, h.end-h.line)))
 	}
 }
 
@@ -531,9 +557,12 @@ func (m *Model) savePartial() {
 func (m *Model) selectSection(i int) {
 	n := len(m.journal.Sections) + 1
 	m.selected = (i%n + n) % n
-	m.item = -1
 	m.refresh()
 	m.viewport.GotoTop()
+	// Back at a topic, its focused item shows again.
+	if k := m.focusPos(); k > 0 {
+		m.reveal(m.itemHeadings()[k], true)
+	}
 }
 
 func (m *Model) current() *brief.Section {
@@ -589,29 +618,30 @@ func (m *Model) refresh() {
 		m.showCursor()
 		return
 	}
-	md, heads, tags := m.markdown()
+	md, heads, stops, tags := m.markdown()
 	m.hlLines = nil
 	lines := make([]int, len(heads))
 	for i, h := range heads {
 		lines[i] = h.line
 	}
-	var starts []int
-	m.content, starts = renderItems(md, m.viewport.Width, m.theme, lines, tags)
-	if len(starts) == len(heads) {
+	var starts, ends []int
+	m.content, starts, ends = renderItems(md, m.viewport.Width, m.theme, lines, stops, tags)
+	if len(starts) == len(heads) && len(ends) == len(heads) {
 		for i := range heads {
-			heads[i].line = starts[i]
+			heads[i].line, heads[i].end = starts[i], ends[i]
 		}
 		m.headings = heads
 	}
-	m.viewport.SetContent(m.content)
+	m.showFocus()
 }
 
 // heading is the start of an item of a topic's digest, or of another
 // heading or bold-led line in it.
 type heading struct {
 	line     int    // in the Markdown shown, then in content
+	end      int    // an item's last line in content (see itemEnds)
 	item     int    // its index in Items, or -1
-	headline string // for another heading
+	headline string // its item's headline, or another heading's
 }
 
 // itemLine is the first line of the kth item in content, or -1.
@@ -624,10 +654,152 @@ func (m *Model) itemLine(k int) int {
 	return -1
 }
 
+// itemHeadings are the headings of the topic's items, in order.
+func (m *Model) itemHeadings() []heading {
+	if m.selected == 0 {
+		return nil
+	}
+	var hs []heading
+	for _, h := range m.headings {
+		if h.item >= 0 {
+			hs = append(hs, h)
+		}
+	}
+	return hs
+}
+
+// focusPos is the focused item's index in itemHeadings, or -1 if the
+// topic shows none: the item with the headline ↑/↓, a click or Enter on
+// a highlight last focused in this topic, else the first.
+func (m *Model) focusPos() int {
+	hs := m.itemHeadings()
+	if len(hs) == 0 {
+		return -1
+	}
+	if hl, ok := m.itemFocus[m.current().Topic]; ok {
+		if i := slices.IndexFunc(hs, func(h heading) bool { return h.headline == hl }); i >= 0 {
+			return i
+		}
+	}
+	return 0
+}
+
+// setFocus focuses the item at k in itemHeadings and marks it.
+func (m *Model) setFocus(k int) {
+	hs := m.itemHeadings()
+	if k < 0 || k >= len(hs) {
+		return
+	}
+	if m.itemFocus == nil {
+		m.itemFocus = map[string]string{}
+	}
+	m.itemFocus[m.current().Topic] = hs[k].headline
+	m.showFocus()
+}
+
+// inView reports whether any line of h shows in the viewport.
+func (m *Model) inView(h heading) bool {
+	top := m.viewport.YOffset
+	return h.end >= top && h.line <= top+m.viewport.Height-1
+}
+
+// showFocus gives the viewport the content with the focused item marked
+// (see markLines); the rendered content is kept as it is.
+func (m *Model) showFocus() {
+	content := m.content
+	if k := m.focusPos(); k >= 0 {
+		h := m.itemHeadings()[k]
+		content = markLines(content, h.line, h.end, focusMark(m.theme))
+	}
+	m.viewport.SetContent(content)
+}
+
+// onItems reports whether ↑/↓ move between the items of a topic: the
+// Summary pane has focus and shows a topic with items.
+func (m *Model) onItems() bool {
+	return m.focus == focusSummary && m.selected != 0 && !m.showHelp && m.set == nil && m.focusPos() >= 0
+}
+
+// itemDown scrolls a line while the focused item goes on below the
+// viewport, else focuses the next item and shows it; past the last item
+// it scrolls on, through Related and Sources.
+func (m *Model) itemDown() {
+	hs, k := m.itemHeadings(), m.focusPos()
+	switch bottom := m.viewport.YOffset + m.viewport.Height - 1; {
+	case hs[k].end > bottom:
+		m.viewport.ScrollDown(1)
+	case k+1 < len(hs):
+		m.setFocus(k + 1)
+		m.reveal(hs[k+1], true)
+	default:
+		m.viewport.ScrollDown(1)
+	}
+}
+
+// itemUp scrolls a line while the focused item starts above the
+// viewport, else focuses the previous item and shows it; at the first
+// item it scrolls on a line at a time, up to the top.
+func (m *Model) itemUp() {
+	hs, k := m.itemHeadings(), m.focusPos()
+	switch {
+	case hs[k].line < m.viewport.YOffset || k == 0:
+		m.viewport.ScrollUp(1)
+	default:
+		m.setFocus(k - 1)
+		m.reveal(hs[k-1], false)
+	}
+}
+
+// reveal scrolls just enough to show item h: as much of it as fits from
+// its start when moving down, up to its end when moving up.
+func (m *Model) reveal(h heading, down bool) {
+	top, height := m.viewport.YOffset, m.viewport.Height
+	switch {
+	case down && h.line < top:
+		m.viewport.SetYOffset(h.line)
+	case down && h.end > top+height-1:
+		m.viewport.SetYOffset(min(h.line, h.end-height+1))
+	case !down && h.end > top+height-1:
+		m.viewport.SetYOffset(h.end - height + 1)
+	case !down && h.line < top:
+		m.viewport.SetYOffset(max(h.line, h.end-height+1))
+	}
+}
+
+// reanchor focuses the first item at least partly in view after the
+// viewport scrolled freely, if the focused one is out of view; with none
+// in view (Related, the Sources or an intro fill it), the nearest above
+// it, else the nearest below.
+func (m *Model) reanchor() {
+	k := m.focusPos()
+	if k < 0 || m.inView(m.itemHeadings()[k]) {
+		return
+	}
+	hs := m.itemHeadings()
+	if i := slices.IndexFunc(hs, m.inView); i >= 0 {
+		m.setFocus(i)
+		return
+	}
+	above := -1
+	for i, h := range hs {
+		if h.end < m.viewport.YOffset {
+			above = i
+		}
+	}
+	m.setFocus(max(0, above))
+}
+
+// itemAtLine is the index in itemHeadings of the item content line l is
+// on, or -1.
+func (m *Model) itemAtLine(l int) int {
+	return slices.IndexFunc(m.itemHeadings(), func(h heading) bool { return h.line <= l && l <= h.end })
+}
+
 // markdown is what the summary pane shows of the selected section, the
-// lines of it that start a topic's items and other headings, and those
-// that hold its items' tags (see brief.TagLines).
-func (m *Model) markdown() (string, []heading, map[int]bool) {
+// lines of it that start a topic's items and other headings, the first
+// line after the digest (a note or the sources), which ends its last
+// item, and the lines that hold its items' tags (see brief.TagLines).
+func (m *Model) markdown() (string, []heading, []int, map[int]bool) {
 	s := m.current()
 	var md, head string
 	switch {
@@ -643,18 +815,33 @@ func (m *Model) markdown() (string, []heading, map[int]bool) {
 		head = "## " + s.Topic + "\n\n"
 	}
 	var heads []heading
+	var stops []int
 	tags := map[int]bool{}
 	if md == "" {
 		md = head + s.Render()
-		off, items := strings.Count(head, "\n"), s.ItemLines()
+		off, items, its := strings.Count(head, "\n"), s.ItemLines(), s.Items()
+		end := off + strings.Count(s.Markdown, "\n")
+		for j, l := range strings.Split(md[len(head)+len(s.Markdown):], "\n") {
+			if j > 0 && strings.TrimSpace(l) != "" {
+				stops = append(stops, end+j)
+				break
+			}
+		}
 		for l, h := range brief.TagLines(s.Markdown) {
 			tags[off+l] = h
 		}
-		for i, l := range strings.Split(s.Markdown, "\n") {
+		lines := strings.Split(s.Markdown, "\n")
+		code := fencedLines(lines)
+		for i, l := range lines {
 			t := strings.TrimSpace(l)
 			switch k := slices.Index(items, i); {
 			case k >= 0:
-				heads = append(heads, heading{line: off + i, item: k})
+				h := heading{line: off + i, item: k}
+				if k < len(its) {
+					h.headline = its[k].Headline
+				}
+				heads = append(heads, h)
+			case code[i]:
 			case (strings.HasPrefix(t, "#") || strings.HasPrefix(t, "**")) && !brief.IsRelated(t):
 				heads = append(heads, heading{line: off + i, item: -1, headline: brief.Headline(t)})
 			}
@@ -669,7 +856,7 @@ func (m *Model) markdown() (string, []heading, map[int]bool) {
 			md = strings.TrimSuffix(b.String(), ">\n") + "\n" + md
 		}
 	}
-	return md, heads, tags
+	return md, heads, stops, tags
 }
 
 // warnings are the run's overshoot and budget warnings, shown atop the
@@ -813,8 +1000,12 @@ func (m *Model) jump() {
 	m.selectSection(i + 1)
 	if k := brief.ItemIndex(items, h.Headline); k >= 0 {
 		if line := m.itemLine(k); line >= 0 {
+			if m.itemFocus == nil {
+				m.itemFocus = map[string]string{}
+			}
+			m.itemFocus[m.current().Topic] = items[k].Headline
+			m.showFocus()
 			m.viewport.SetYOffset(line)
-			m.item, m.itemAt = k, m.viewport.YOffset
 		}
 		return
 	}
@@ -833,9 +1024,7 @@ func (m *Model) jump() {
 }
 
 // currentItem is the item the summary pane points at: the selected
-// highlight's on the Overview, else the one Enter jumped to while the
-// viewport has not moved, else the one whose heading is the last at or
-// above the top of the viewport (the first if none is).
+// highlight's on the Overview, else the topic's focused item.
 func (m *Model) currentItem() (brief.Item, bool) {
 	if m.onHighlights() {
 		h := m.highlights()[m.cursor]
@@ -857,16 +1046,15 @@ func (m *Model) currentItem() (brief.Item, bool) {
 	if len(items) == 0 {
 		return brief.Item{}, false
 	}
-	if m.item >= 0 && m.item < len(items) && m.viewport.YOffset == m.itemAt {
-		return items[m.item], true
-	}
-	best := 0
-	for _, h := range m.headings {
-		if h.item >= 0 && h.item < len(items) && h.line <= m.viewport.YOffset {
-			best = h.item
+	if k := m.focusPos(); k >= 0 {
+		if i := m.itemHeadings()[k].item; i < len(items) {
+			return items[i], true
 		}
 	}
-	return items[best], true
+	if k := brief.ItemIndex(items, m.itemFocus[m.current().Topic]); k >= 0 && m.itemFocus[m.current().Topic] != "" {
+		return items[k], true
+	}
+	return items[0], true
 }
 
 func (m *Model) View() string {

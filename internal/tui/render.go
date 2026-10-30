@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,7 +91,8 @@ var renderers = struct {
 // for one: a link is tokStart, its number, tokEnd and tokPad up to the
 // width of its text; a blockquote paragraph is its number between two
 // quoteMark; itemMark starts each item's first line; hyphenMark stands for
-// a hyphen in text (see protectHyphens).
+// a hyphen in text (see protectHyphens); stopMark is in the Related and
+// Sources headings, which end the item before them.
 const (
 	tokStart   = '\uE000'
 	tokPad     = '\uE001'
@@ -98,6 +100,7 @@ const (
 	quoteMark  = '\uE003'
 	itemMark   = '\uE004'
 	hyphenMark = '\uE005'
+	stopMark   = '\uE006'
 )
 
 // entityRE matches HTML character references: numeric, decimal or hex,
@@ -116,7 +119,7 @@ func sanitise(md string) string {
 		return ref
 	})
 	return strings.Map(func(r rune) rune {
-		if r >= tokStart && r <= hyphenMark {
+		if r >= tokStart && r <= stopMark {
 			return -1
 		}
 		return r
@@ -144,7 +147,7 @@ func unsafeEntity(ref string) bool {
 		decoded = html.UnescapeString(ref)
 	}
 	return strings.ContainsFunc(decoded, func(r rune) bool {
-		return (r >= tokStart && r <= hyphenMark) || brief.StripControl(string(r)) == ""
+		return (r >= tokStart && r <= stopMark) || brief.StripControl(string(r)) == ""
 	})
 }
 
@@ -247,22 +250,25 @@ func validOSC8(body string) bool {
 // is, without control characters. md is taken as one digest: its items'
 // tags (see brief.TagLines) show as badges.
 func Render(md string, width int, theme string) string {
-	out, _ := renderItems(md, width, theme, nil, brief.TagLines(md))
+	out, _, _ := renderItems(md, width, theme, nil, nil, brief.TagLines(md))
 	return out
 }
 
 // renderItems is Render that also returns the rendered line each of
-// items, lines of md such as an item's heading, starts on. The lines tags
-// lists hold impact tags, shown as badges (see tagLine).
-func renderItems(md string, width int, theme string, items []int, tags map[int]bool) (string, []int) {
+// items, lines of md such as an item's heading, starts on, and the line
+// each ends on: its last line with text before the next of items, the
+// Related rule, the Sources heading or the first of stops, lines of md
+// that end the item before them (see itemEnds). The lines tags lists hold
+// impact tags, shown as badges (see tagLine).
+func renderItems(md string, width int, theme string, items, stops []int, tags map[int]bool) (string, []int, []int) {
 	width = max(1, width)
 	md = sanitise(md)
-	pre, links, quotes := preRender(md, width, theme, items, tags)
+	pre, links, quotes := preRender(md, width, theme, items, stops, tags)
 	renderers.Lock()
 	defer renderers.Unlock()
 	out, ok := renderWith(pre, width, theme)
 	if !ok {
-		return termSafe(fitLines(md, width)), nil
+		return termSafe(fitLines(md, width)), nil, nil
 	}
 	if len(quotes) > 0 {
 		lines := strings.Split(out, "\n")
@@ -275,14 +281,46 @@ func renderItems(md string, width int, theme string, items []int, tags map[int]b
 	}
 	out = strings.ReplaceAll(out, string(hyphenMark), "-")
 	lines := strings.Split(fitLines(links.restore(out), width), "\n")
-	var starts []int
+	var starts, ended []int
 	for i, l := range lines {
 		if strings.ContainsRune(l, itemMark) {
 			starts = append(starts, i)
-			lines[i] = strings.ReplaceAll(l, string(itemMark), "")
+			l = strings.ReplaceAll(l, string(itemMark), "")
 		}
+		if strings.ContainsRune(l, stopMark) {
+			ended = append(ended, i)
+			l = strings.ReplaceAll(l, string(stopMark), "")
+		}
+		lines[i] = l
 	}
-	return termSafe(strings.Join(lines, "\n")), starts
+	return termSafe(strings.Join(lines, "\n")), starts, itemEnds(lines, starts, ended)
+}
+
+// itemEnds is the line each item that starts at starts ends on, in
+// lines: the last before the next start or the next of stops, the
+// rendered Related and Sources headings, that is neither blank nor a
+// rule (the Related rule above its heading), and never before its start.
+func itemEnds(lines []string, starts, stops []int) []int {
+	ends := make([]int, len(starts))
+	for i, s := range starts {
+		next := len(lines)
+		if i+1 < len(starts) {
+			next = starts[i+1]
+		}
+		if k := slices.IndexFunc(stops, func(st int) bool { return st > s }); k >= 0 {
+			next = min(next, stops[k])
+		}
+		e := next - 1
+		for e > s {
+			t := strings.TrimSpace(ansi.Strip(lines[e]))
+			if t != "" && strings.Trim(t, "─") != "" {
+				break
+			}
+			e--
+		}
+		ends[i] = max(s, e)
+	}
+	return ends
 }
 
 // renderWith renders md with the cached renderer for width and theme; the
@@ -559,20 +597,25 @@ var (
 	sourceLineRE = regexp.MustCompile(`^([-*+] +)\[([^\]]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)\s*$`)
 	// itemPrefixRE is the heading or list marker before an item's text.
 	itemPrefixRE = regexp.MustCompile(`^\s*(?:#{1,6}\s+|(?:[-*+]|\d+[.)])\s+)?`)
+	// stopLeadRE is the indent, blockquote markers and emphasis markers
+	// before a stop's text: stopMark goes after them, so they still open.
+	stopLeadRE = regexp.MustCompile(`^[\s>]*[*_]*`)
 )
 
 // preRender rewrites sanitised Markdown for display; what is stored is
 // untouched. Updates show as "↻ Update · …", a Related label as a rule
 // and a small heading, and the impact tag on each line tags lists as a
 // badge (see tagLine): no other line, so never one in a code block or a
-// tag brief does not count; the lines items lists are marked with itemMark. Each http(s)
+// tag brief does not count; the lines items lists are marked with itemMark,
+// and those stops lists, the Related label and the Sources heading with
+// stopMark. Each http(s)
 // link becomes placeholder tokens no narrower than its text: "↗ domain"
 // for [source](url) links and bare URLs, its title for others, and
 // "title · domain" in the Sources list; other links show as their title
 // alone, and never as a URL. Tokens hold no spaces, so glamour never
 // breaks one; a title gets a token per word (short words joined), so it
 // still wraps. Every token is cut to fit the width.
-func preRender(md string, width int, theme string, items []int, tags map[int]bool) (string, links, []string) {
+func preRender(md string, width int, theme string, items, stops []int, tags map[int]bool) (string, links, []string) {
 	var ls links
 	limit := max(6, width-2*docMargin-6) // list and quote indents
 	token := func(l link) string {
@@ -641,14 +684,24 @@ func preRender(md string, width int, theme string, items []int, tags map[int]boo
 			lines[i] = lines[i][:n] + string(itemMark) + lines[i][n:]
 		}
 	}
+	for _, i := range stops {
+		if i >= 0 && i < len(lines) && strings.TrimSpace(lines[i]) != "**Sources**" {
+			n := len(stopLeadRE.FindString(lines[i]))
+			lines[i] = lines[i][:n] + string(stopMark) + lines[i][n:]
+		}
+	}
 	inSources := false
+	code := fencedLines(lines)
 	for i, l := range lines {
 		switch t := strings.TrimSpace(l); {
+		case code[i]:
+			// Inside a fenced code block nothing is a heading or a source.
 		case t == "**Sources**":
 			inSources = true
+			lines[i] = "**" + string(stopMark) + "Sources**"
 			continue
 		case brief.IsRelated(t):
-			lines[i] = "\n---\n\n###### Related\n"
+			lines[i] = "\n---\n\n###### " + string(stopMark) + "Related\n"
 			continue
 		case t == "":
 		case inSources && sourceLineRE.MatchString(t):
@@ -749,6 +802,29 @@ func protectHyphens(md string, limit int) string {
 	return strings.Join(lines, "\n")
 }
 
+// fencedLines reports, for each of lines, whether it is inside a fenced
+// code block or one of its fences, as protectHyphens tracks them: a block
+// opens at a line starting with ``` or ~~~ and closes at the next line
+// starting with the same.
+func fencedLines(lines []string) []bool {
+	code := make([]bool, len(lines))
+	fence := ""
+	for i, l := range lines {
+		if m := fenceRE.FindStringSubmatch(l); m != nil {
+			switch fence {
+			case "":
+				fence = m[1]
+			case m[1]:
+				fence = ""
+			}
+			code[i] = true
+			continue
+		}
+		code[i] = fence != ""
+	}
+	return code
+}
+
 // isAlnum reports whether r is a letter or a digit.
 func isAlnum(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 
@@ -823,4 +899,54 @@ func extractQuotes(md string) (string, []string) {
 	}
 	flush()
 	return strings.Join(out, "\n"), quotes
+}
+
+// focusMark is the marker of the focused item in theme: "▎" in the
+// accent colour, or ">" without a colour theme. Its colour ends with
+// the foreground alone, so no other style of the line is reset.
+func focusMark(theme string) string {
+	var c lipgloss.Color
+	switch theme {
+	case themeDark:
+		c = lipgloss.Color(accent.Dark)
+	case themeLight:
+		c = lipgloss.Color(accent.Light)
+	default:
+		return ">"
+	}
+	out := lipgloss.NewStyle().Foreground(c).Render("▎")
+	if s, ok := strings.CutSuffix(out, "\x1b[0m"); ok {
+		out = s + "\x1b[39m"
+	}
+	return out
+}
+
+// markLines puts mark, one cell wide, in the first cell of the left
+// document margin of content's lines from start to end, before any escape
+// sequence the line starts with, so it is never part of a hyperlink. A
+// line that starts with text rather than the margin's space, such as one
+// hard-wrapped at a narrow width, is left as it is; a blank one gets the
+// mark alone. Only the lines changed are rebuilt: content was rendered
+// once, and moving the focus never renders it again.
+func markLines(content string, start, end int, mark string) string {
+	lines := strings.Split(content, "\n")
+	for i := max(0, start); i <= end && i < len(lines); i++ {
+		lines[i] = markLine(lines[i], mark)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func markLine(line, mark string) string {
+	for i := 0; i < len(line); {
+		switch line[i] {
+		case '\x1b':
+			n, _ := escape(line[i:])
+			i += max(1, n)
+			continue
+		case ' ':
+			return mark + line[:i] + line[i+1:]
+		}
+		return line
+	}
+	return mark + line
 }

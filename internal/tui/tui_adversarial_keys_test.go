@@ -396,10 +396,16 @@ func TestAdv_ScrollPositionAcrossNavigation(t *testing.T) {
 }
 
 // Terminals send the wheel as ↑/↓ in the alternate screen: with focus on
-// Summary they scroll and never change the topic.
+// Summary they never change the topic. Each of these topics is one item
+// taller than the viewport, so ↓ scrolls it a line at a time to the
+// bottom, ↑ a line at a time back to the top (at the first item too), and
+// a jittery wheel still makes progress.
 func TestAdv_WheelAsArrowKeys(t *testing.T) {
 	m := newSized(journals()["long"], 120, 30)
 	m.Update(runes("2"))
+	if n := len(m.itemHeadings()); n != 1 {
+		t.Fatalf("%d items, want the one tall item", n)
+	}
 	bottom := m.viewport.TotalLineCount() - m.viewport.Height
 	for i := 1; i <= bottom+20; i++ {
 		m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -413,14 +419,17 @@ func TestAdv_WheelAsArrowKeys(t *testing.T) {
 			t.Fatalf("wheel up %d: YOffset %d want %d, selected %d", i, m.viewport.YOffset, want, m.selected)
 		}
 	}
-	// Bursts in alternating direction.
-	for range 50 {
+	// Bursts in alternating direction: one line down per ↓↓↑.
+	for i := 1; i <= 50; i++ {
 		m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		if m.viewport.YOffset != i {
+			t.Fatalf("mixed wheel burst %d: YOffset %d", i, m.viewport.YOffset)
+		}
 	}
-	if m.viewport.YOffset != 50 || m.selected != 1 {
-		t.Errorf("mixed wheel: YOffset %d, selected %d", m.viewport.YOffset, m.selected)
+	if m.viewport.YOffset != 50 || m.selected != 1 || m.focusPos() != 0 {
+		t.Errorf("mixed wheel: YOffset %d, selected %d, item %d", m.viewport.YOffset, m.selected, m.focusPos())
 	}
 }
 

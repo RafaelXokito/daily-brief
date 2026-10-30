@@ -43,9 +43,10 @@ func filler(n int) string {
 	return b.String()
 }
 
-// topLine is the first non-blank line the viewport shows, without styling.
+// topLine is the first line the viewport shows, without styling or the
+// focused item's marker.
 func topLine(m *Model) string {
-	return strings.TrimSpace(ansi.Strip(strings.Split(m.viewport.View(), "\n")[0]))
+	return strings.TrimSpace(strings.TrimPrefix(ansi.Strip(strings.Split(m.viewport.View(), "\n")[0]), "▎"))
 }
 
 // Enter lands with the target heading on the viewport's top line, for

@@ -116,7 +116,7 @@ func TestRenderWarningsKeepTheirBar(t *testing.T) {
 	m.journal.Overview.Highlights = nil
 	m.refresh()
 	for width := 30; width <= 120; width += 7 {
-		md, _, _ := m.markdown()
+		md, _, _, _ := m.markdown()
 		out := Render(md, width, "dark")
 		checkRendered(t, "warnings", out, width)
 		plain := ansi.Strip(out)
@@ -271,13 +271,17 @@ func TestOpenAndCopy(t *testing.T) {
 		t.Errorf("flash %q not cleared", m.flash)
 	}
 
-	// In a topic, the item nearest the top of the viewport.
+	// In a topic, the focused item: the first at the top, then the one
+	// ↓ moved to.
 	m.Update(runes("2"))
 	m.Update(runes("o"))
 	if got := f.opened[len(f.opened)-1]; got != longURL {
 		t.Errorf("at the top opened %s", got)
 	}
-	m.viewport.SetYOffset(m.itemLine(brief.ItemIndex(m.current().Items(), "Spring Boot 4 milestone slips again")) + 1)
+	want := brief.ItemIndex(m.current().Items(), "Spring Boot 4 milestone slips again")
+	for i := 0; i < 100 && m.itemHeadings()[m.focusPos()].item != want; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
 	m.Update(runes("o"))
 	m.Update(runes("y"))
 	if got := f.opened[len(f.opened)-1]; got != "https://spring.io/blog/m3" {

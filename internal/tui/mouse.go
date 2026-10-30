@@ -102,9 +102,10 @@ func highlightAt(content string, starts []int, line int) int {
 
 // handleMouse acts on a press of the left button or a wheel step; motion,
 // releases and other buttons do nothing. A click on a topic opens it, a
-// click on the Summary focuses it, and on the Overview's highlights goes
-// to the one clicked, as enter does. The wheel moves the selected topic
-// over the Topics pane and scrolls the Summary elsewhere. While Settings
+// click on the Summary focuses it, on the Overview's highlights goes to
+// the one clicked, as enter does, and on a topic's item focuses that item.
+// The wheel moves the selected topic over the Topics pane and scrolls the
+// Summary elsewhere, refocusing an item if the focused one leaves view. While Settings
 // is open clicks and the wheel do nothing; over the list of keys the wheel
 // scrolls it.
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
@@ -142,8 +143,10 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 		case wheel < 0:
 			m.viewport.ScrollUp(wheelLines)
+			m.reanchor()
 		default:
 			m.viewport.ScrollDown(wheelLines)
+			m.reanchor()
 		}
 		return nil
 	}
@@ -160,6 +163,10 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 				m.cursor = k
 				m.jump()
 			}
+		} else if k := m.itemAtLine(m.viewport.YOffset + h.index); k >= 0 {
+			// A click on an item of a topic focuses it; one on a heading,
+			// Related or Sources only focuses the pane.
+			m.setFocus(k)
 		}
 	}
 	return nil
