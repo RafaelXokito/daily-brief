@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -71,13 +70,9 @@ func run() error {
 	if args[0] == "auth" {
 		return authCommand(args[1], cfg, *configPath)
 	}
-	if *budget > 0 {
-		cfg.TokenBudget = *budget
-	}
-	if *topics != "" {
-		if err := cfg.FilterTopics(strings.Split(*topics, ",")); err != nil {
-			return err
-		}
+	ov := overrides{provider: *provider, budget: *budget, topics: *topics}
+	if err := ov.apply(&cfg); err != nil {
+		return err
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -98,11 +93,8 @@ func run() error {
 
 	// A saved journal can be viewed without credentials, so a backend
 	// error only matters once we need to generate.
-	backend, backendErr := brief.NewBackend(context.Background(), cfg)
-	var gen *brief.Generator
-	if backendErr == nil {
-		gen = brief.NewGenerator(cfg, backend)
-	} else if journal == nil {
+	gen, backendErr := newGenerator(cfg)
+	if backendErr != nil && journal == nil {
 		return backendErr
 	}
 	if journal == nil {
@@ -117,9 +109,79 @@ func run() error {
 		return printJournal(gen, journal, cfg.Theme)
 	}
 
+	// The terminal is asked for its background before the TUI owns it, in
+	// case the Settings pane switches the theme to auto.
+	autoTheme := resolveTheme("auto")
 	theme := resolveTheme(cfg.Theme)
-	_, err = tea.NewProgram(tui.New(gen, backendErr, journal, theme), programOptions()...).Run()
+	m := tui.New(gen, backendErr, journal, theme).WithSettings(tui.Settings{
+		Path:      *configPath,
+		Overrides: ov.describe(),
+		// The pane saves the file's config; this session's overrides still
+		// apply to its runs.
+		Rebuild: func(saved config.Config) (*brief.Generator, error) {
+			if err := ov.apply(&saved); err != nil {
+				return nil, err
+			}
+			if err := saved.Validate(); err != nil {
+				return nil, err
+			}
+			return newGenerator(saved)
+		},
+		Theme: func(name string) string {
+			if name != "dark" && name != "light" {
+				name = autoTheme
+			}
+			lipgloss.SetHasDarkBackground(name == "dark")
+			return name
+		},
+	})
+	_, err = tea.NewProgram(m, programOptions()...).Run()
 	return err
+}
+
+// newGenerator connects to the configured provider and plans runs of cfg.
+func newGenerator(cfg config.Config) (*brief.Generator, error) {
+	backend, err := brief.NewBackend(context.Background(), cfg)
+	if err != nil {
+		return nil, err
+	}
+	return brief.NewGenerator(cfg, backend), nil
+}
+
+// overrides are this session's -provider, -budget and -topics flags,
+// which apply to its runs but are never saved to the config.
+type overrides struct {
+	provider string
+	budget   int64
+	topics   string
+}
+
+func (o overrides) apply(cfg *config.Config) error {
+	if o.provider != "" {
+		cfg.Provider.Type = o.provider
+	}
+	if o.budget > 0 {
+		cfg.TokenBudget = o.budget
+	}
+	if o.topics != "" {
+		return cfg.FilterTopics(strings.Split(o.topics, ","))
+	}
+	return nil
+}
+
+// describe names the overrides in effect, e.g. "provider=aws".
+func (o overrides) describe() []string {
+	var out []string
+	if o.provider != "" {
+		out = append(out, "provider="+o.provider)
+	}
+	if o.budget > 0 {
+		out = append(out, fmt.Sprintf("budget=%d", o.budget))
+	}
+	if o.topics != "" {
+		out = append(out, "topics="+o.topics)
+	}
+	return out
 }
 
 // resolveTheme turns the configured theme into dark or light: auto takes
@@ -276,11 +338,7 @@ func budgetCommand(cfg config.Config, auto bool) error {
 }
 
 func openEditor(path string) error {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
-	}
-	cmd := exec.Command(editor, path)
+	cmd := tui.EditorCommand(path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }

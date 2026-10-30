@@ -12,7 +12,7 @@ import (
 type keyMap struct {
 	Up, Down, Topics, Summary, Go, Back, Toggle     key.Binding
 	PageDown, PageUp, HalfDown, HalfUp, Top, Bottom key.Binding
-	Jump, Open, Copy, Reader                        key.Binding
+	Jump, Open, Copy, Reader, Settings              key.Binding
 	Help, Esc, Regenerate, Quit                     key.Binding
 }
 
@@ -37,6 +37,7 @@ var keys = keyMap{
 	Open:       key.NewBinding(key.WithKeys("o"), key.WithHelp("", "open the item's source")),
 	Copy:       key.NewBinding(key.WithKeys("y"), key.WithHelp("", "copy item and link")),
 	Reader:     key.NewBinding(key.WithKeys("z"), key.WithHelp("", "reader mode on/off")),
+	Settings:   key.NewBinding(key.WithKeys("s", ","), key.WithHelp("", "settings")),
 	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("", "show/close this help")),
 	Esc:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("", "close help / Topics")),
 	Regenerate: key.NewBinding(key.WithKeys("r"), key.WithHelp("", "regenerate the journal")),
@@ -46,7 +47,7 @@ var keys = keyMap{
 // all lists the bindings in the order the help overlay shows them.
 func (k keyMap) all() []key.Binding {
 	return []key.Binding{k.Up, k.Down, k.Topics, k.Summary, k.Go, k.Back, k.Toggle, k.PageDown, k.PageUp, k.HalfDown, k.HalfUp,
-		k.Top, k.Bottom, k.Jump, k.Open, k.Copy, k.Reader, k.Help, k.Esc, k.Regenerate, k.Quit}
+		k.Top, k.Bottom, k.Jump, k.Open, k.Copy, k.Reader, k.Settings, k.Help, k.Esc, k.Regenerate, k.Quit}
 }
 
 // keyName is how the help shows a key.
@@ -135,9 +136,10 @@ func helpLine(mode helpMode, generating bool, width int) string {
 	default:
 		items = []helpItem{scroll, page, topics, reader}
 	}
-	end := []helpItem{{"regenerate", []key.Binding{keys.Regenerate}}, {"quit", []key.Binding{keys.Quit}}}
+	settings := helpItem{"settings", []key.Binding{keys.Settings}}
+	end := []helpItem{settings, {"regenerate", []key.Binding{keys.Regenerate}}, {"quit", []key.Binding{keys.Quit}}}
 	if generating {
-		end = []helpItem{{"quit (cancels run)", []key.Binding{keys.Quit}}}
+		end = []helpItem{settings, {"quit (cancels run)", []key.Binding{keys.Quit}}}
 	}
 	help := helpItem{"help", []key.Binding{keys.Help}}.String()
 	var shown, rest []string

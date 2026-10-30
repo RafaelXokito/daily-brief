@@ -112,10 +112,20 @@ type Model struct {
 	flash        string // replaces the help line for a moment
 	flashID      int
 
-	// open opens a URL in the browser and copy puts text on the
-	// clipboard; tests replace them.
-	open func(url string) error
-	copy func(text string) error
+	// open opens a URL in the browser, copy puts text on the clipboard and
+	// editor runs $EDITOR on a file; tests replace them.
+	open   func(url string) error
+	copy   func(text string) error
+	editor func(path string, done func(error) tea.Msg) tea.Cmd
+
+	settings Settings
+	set      *settingsPane // the open Settings pane, or nil
+	// pending is a generator rebuilt for saved settings while a run was
+	// using gen; it replaces gen when the run ends. rebuilds counts the
+	// rebuilds started, so a late one never replaces a newer one.
+	pending  *brief.Generator
+	rebuilds int
+	building *rebuildJob // the latest rebuild, until Update has its result
 }
 
 // New shows journal if it is non-nil, otherwise generates a fresh one.
@@ -125,7 +135,7 @@ type Model struct {
 func New(gen *brief.Generator, genErr error, journal *brief.Journal, theme string) *Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(accent)
-	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, theme: theme, item: -1, open: openURL, copy: copyText}
+	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, theme: theme, item: -1, open: openURL, copy: copyText, editor: openEditor}
 }
 
 // openURL opens url with the system's opener, if it is an http(s) URL
@@ -261,6 +271,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case doneMsg:
 		m.generating = false
+		if m.pending != nil {
+			// Saved settings take effect now that no run uses gen.
+			m.gen, m.genErr, m.pending = m.pending, nil, nil
+		}
 		// Saving fills failed topics from the journal saved earlier today.
 		switch err := brief.SaveJournal(m.running); {
 		case errors.Is(err, brief.ErrNothingDone):
@@ -274,6 +288,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 
+	case rebuiltMsg:
+		return m, m.rebuilt(msg)
+
+	case editorDoneMsg:
+		return m, m.editorDone(msg)
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -285,15 +305,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// quit cancels a run, saving what it has done, and quits.
+func (m *Model) quit() tea.Cmd {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	if m.generating {
+		m.savePartial()
+	}
+	return tea.Quit
+}
+
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.set != nil {
+		return m.settingsKey(msg)
+	}
 	if key.Matches(msg, keys.Quit) {
-		if m.cancel != nil {
-			m.cancel()
-		}
-		if m.generating {
-			m.savePartial()
-		}
-		return m, tea.Quit
+		return m, m.quit()
 	}
 	if m.showHelp {
 		// Only the keys that scroll or close the list do anything.
@@ -320,6 +348,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Help):
 		m.showHelp = true
 		m.keysView.GotoTop()
+	case key.Matches(msg, keys.Settings):
+		return m, m.openSettings()
 	case key.Matches(msg, keys.Topics, keys.Esc, keys.Toggle) && m.reader:
 		// The Topics pane is hidden in reader mode: show it again.
 		m.reader = false
@@ -407,16 +437,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusSummary
 		m.resize()
 	case key.Matches(msg, keys.Regenerate):
+		var note tea.Cmd
+		if m.building != nil && !m.generating {
+			// Saved settings apply to this run, even before their rebuild
+			// has been reported.
+			note = m.rebuilt(m.building.get())
+		}
 		if m.gen == nil {
 			m.status = "Cannot regenerate: no connection to Claude"
 			if m.genErr != nil {
 				m.status = "Cannot regenerate: " + m.genErr.Error()
 			}
-			return m, nil
+			return m, note
 		}
 		if !m.generating {
 			m.selected = 0
-			return m, m.start()
+			return m, tea.Batch(note, m.start())
 		}
 	}
 	return m, nil
@@ -627,7 +663,7 @@ func (m *Model) hasHighlights() bool {
 
 // onHighlights reports whether the summary pane shows the highlights.
 func (m *Model) onHighlights() bool {
-	return m.selected == 0 && m.hasHighlights() && !m.showHelp
+	return m.selected == 0 && m.hasHighlights() && !m.showHelp && m.set == nil
 }
 
 // highlights are the Overview's highlights in display order: "act" first.
@@ -845,7 +881,10 @@ func (m *Model) View() string {
 	if m.showHelp {
 		content = m.keysPane()
 	}
-	title := paneTitle(truncate(m.paneName(), m.viewport.Width), m.focus == focusSummary || m.showHelp)
+	if m.set != nil {
+		content = m.settingsView(m.viewport.Width, m.viewport.Height)
+	}
+	title := paneTitle(truncate(m.paneName(), m.viewport.Width), m.focus == focusSummary || m.showHelp || m.set != nil)
 	if m.reader {
 		return truncate(header, m.width) + "\n\n" + title + "\n" + content + "\n" + m.helpText()
 	}
@@ -869,6 +908,9 @@ func (m *Model) compactView() string {
 	if m.showHelp {
 		content = m.keysPane()
 	}
+	if m.set != nil {
+		content = m.settingsView(m.viewport.Width, m.viewport.Height)
+	}
 	return truncate(header, m.width) + "\n" + content + "\n" + m.helpText()
 }
 
@@ -876,6 +918,9 @@ func (m *Model) compactView() string {
 func (m *Model) paneName() string {
 	if m.showHelp {
 		return "Keys"
+	}
+	if m.set != nil {
+		return "Settings"
 	}
 	if title := brief.StripControl(m.current().Topic); m.selected != 0 || title != "" {
 		return title
@@ -891,6 +936,8 @@ func (m *Model) helpText() string {
 		return titleStyle.Render(truncate(m.flash, m.width))
 	case m.showHelp:
 		return helpStyle.Render(overlayHelpLine(m.width))
+	case m.set != nil:
+		return helpStyle.Render(m.settingsHelpLine(m.width))
 	}
 	return helpStyle.Render(helpLine(m.helpMode(), m.generating, m.width))
 }

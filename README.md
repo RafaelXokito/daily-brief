@@ -484,6 +484,7 @@ as `↑/↓`, which scroll the Summary.
 | `o` | open the source of the selected highlight's item, the item `enter` went to, or the item at the top of the Summary, in the browser (`open`, or `xdg-open`); only http(s) links are opened, others show "No web link" |
 | `y` | copy that item as plain text, with its link: `pbcopy` on a Mac outside SSH, else OSC 52 (up to about 75 KB); the help line shows "Copied" only once it was sent |
 | `z` | reader mode: hide Topics and use the full width (`z` again, or `←`/`tab`/`esc`, brings Topics back) |
+| `s` `,` | open the Settings pane (see [Settings](#settings)) |
 | `?` | show or close the list of keys |
 | `esc` | close the list of keys, or focus Topics |
 | `r` | regenerate |
@@ -507,6 +508,45 @@ ignored while it is open. In a terminal smaller than 50×10 the Topics pane is
 hidden and the header names the topic shown; below 20×4 the TUI only says the
 terminal is too small. With more topics than fit, the Topics pane scrolls to
 keep the selected one in view.
+
+### Settings
+
+`s` (or `,`) opens a Settings pane in place of the Summary; Topics stays.
+It edits the config file as it is on disk, never this session's `-provider`,
+`-budget` or `-topics` overrides, which it names at the top ("this session
+overrides: provider=aws") and which keep applying to this session's runs.
+
+| Key | Action |
+| --- | --- |
+| `↑` `k` / `↓` `j` | select a setting |
+| `enter` `→` | edit it; for a choice (provider, auth, effort, theme), the next value |
+| `←` / `space` | previous / next value of a choice |
+| `enter` / `esc` | take / drop an edit |
+| `a` `x` `enter` | on the mute list: add, delete, edit an entry |
+| `ctrl+s` | save |
+| `e` | open the file in `$EDITOR` (for topics, too), then read it again |
+| `R` | read the file again after it changed on disk |
+| `esc` | close; with unsaved changes it asks "Discard changes? y/n" first |
+
+Numbers take digits only and show their range; `token_budget` 0 shows as
+`auto → 575.0k`, the baseline it stands for. The profile shows a live
+`n/500` count, the mute list `n/30`. After each edit the config is checked
+as at start: an error shows at the bottom and blocks saving. Below the
+settings, the budget estimate (`daily-brief budget` in a line, with its
+warnings) follows every edit. The pane never shows a credential: for
+`auth: env` it says only whether `ANTHROPIC_API_KEY` is set.
+
+Saving rewrites only the values that changed, keeping the file's comments,
+key order and keys daily-brief doesn't know, and writes atomically (a
+temporary file renamed over it, with the same mode). If the file changed on
+disk since the pane read it, saving refuses and `R` reloads it. A file of
+several YAML documents, a change to a value shared through a YAML anchor and
+a read-only file are refused too; `e` edits them. Line endings, a byte order
+mark and emoji are kept. A theme change
+shows at once; everything else applies to the next `r`. A run in progress
+keeps its settings, and nothing starts by itself. If the new settings can't
+connect (say, no API key), the file is still saved and the next run keeps
+the previous connection.
 
 ### Rendering
 

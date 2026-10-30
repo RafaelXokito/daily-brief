@@ -146,12 +146,9 @@ func Load(path string) (cfg Config, created bool, err error) {
 	if err != nil {
 		return cfg, false, err
 	}
-	cfg = Default()
-	cfg.Topics = nil
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return cfg, false, fmt.Errorf("parse %s: %w", path, err)
+	if cfg, err = parse(path, data); err != nil {
+		return cfg, false, err
 	}
-	cfg.Clean()
 	return cfg, false, cfg.Validate()
 }
 
@@ -159,9 +156,19 @@ func Save(path string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(cfg)
+	data, err := marshal(cfg)
 	if err != nil {
 		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// marshal is cfg as Save writes it: a header documenting the keys, then
+// the YAML.
+func marshal(cfg Config) ([]byte, error) {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
 	}
 	header := "# daily-brief configuration\n" +
 		"# provider.type: claude-code (your Claude login, no key), anthropic (auth: keychain | profile | env),\n" +
@@ -180,11 +187,21 @@ func Save(path string, cfg Config) error {
 		"#          profile: \"Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor\"\n" +
 		"# mute: optional subjects or keywords to leave out (at most 30, 80 characters each), e.g.\n" +
 		"#          mute: [crypto, celebrity tech gossip]\n"
-	return os.WriteFile(path, append([]byte(header), data...), 0o644)
+	return append([]byte(header), data...), nil
 }
 
 // Topic weights may differ by at most this ratio.
 const maxWeightRatio = 1000
+
+// Upper bounds of the numeric settings. A pass on the API makes at most a
+// dozen search requests (brief's maxRequests), so a higher search cap only
+// matters on claude-code, where 50 is already far past any budget.
+const (
+	MaxSearchesPerTopic = 50
+	MaxReadMinutes      = 120
+	MaxConcurrency      = 16
+	MaxPrice            = 1000
+)
 
 // Limits of the reader profile and mute list, in characters.
 const (
@@ -194,10 +211,15 @@ const (
 )
 
 // Clean strips control and invisible characters (see IsInvisible) from
-// the profile and mute list, as brief.StripControl does from what the
+// the model, location and provider settings, and from the profile and mute
+// list, as brief.StripControl does from what the
 // model writes, puts each on one line and drops empty mute entries. The
 // joiners emoji and some scripts need stay.
 func (c *Config) Clean() {
+	for _, s := range []*string{&c.Model, &c.Country, &c.City, &c.Provider.Type, &c.Provider.Auth, &c.Provider.Profile,
+		&c.Provider.Region, &c.Provider.WorkspaceID, &c.Provider.ProjectID, &c.Provider.ClaudePath} {
+		*s = stripControls(*s)
+	}
 	c.Profile = cleanText(c.Profile)
 	var mute []string
 	for _, m := range c.Mute {
@@ -206,6 +228,18 @@ func (c *Config) Clean() {
 		}
 	}
 	c.Mute = mute
+}
+
+// stripControls removes control and invisible characters from a one-line
+// value and trims it; unlike cleanText it leaves inner spaces, which a
+// path may need.
+func stripControls(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if IsInvisible(r) || unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s))
 }
 
 func cleanText(s string) string {
@@ -249,11 +283,11 @@ func (c Config) Validate() error {
 	if c.TokenBudget != 0 && c.TokenBudget < 10_000 {
 		return errors.New("config: token_budget must be 0 (auto) or at least 10000")
 	}
-	if c.MaxSearchesPerTopic < 0 {
-		return errors.New("config: max_searches_per_topic must be 0 (auto) or positive")
+	if c.MaxSearchesPerTopic < 0 || c.MaxSearchesPerTopic > MaxSearchesPerTopic {
+		return fmt.Errorf("config: max_searches_per_topic must be 0 (auto) or 1 to %d", MaxSearchesPerTopic)
 	}
-	if c.MaxReadMinutes < 1 {
-		return errors.New("config: max_read_minutes must be at least 1")
+	if c.MaxReadMinutes < 1 || c.MaxReadMinutes > MaxReadMinutes {
+		return fmt.Errorf("config: max_read_minutes must be between 1 and %d", MaxReadMinutes)
 	}
 	if n := max(len(c.Topics), len(c.AllTopics)); ReadableItems(c.MaxReadMinutes, n) == 0 {
 		return fmt.Errorf("config: max_read_minutes %d leaves no room for a single item across %d topics; raise it or remove topics", c.MaxReadMinutes, n)
@@ -261,8 +295,10 @@ func (c Config) Validate() error {
 	if c.HistoryDays < 0 || c.HistoryDays > 14 {
 		return errors.New("config: history_days must be between 0 (off) and 14")
 	}
-	if c.PriceInputPerMTok < 0 || c.PriceOutputPerMTok < 0 || c.PricePer1KSearches < 0 {
-		return errors.New("config: prices must not be negative")
+	for _, p := range []float64{c.PriceInputPerMTok, c.PriceOutputPerMTok, c.PricePer1KSearches} {
+		if p < 0 || p > MaxPrice || math.IsNaN(p) {
+			return fmt.Errorf("config: prices must be between 0 and %d USD", MaxPrice)
+		}
 	}
 	switch c.Effort {
 	case "low", "medium", "high", "xhigh", "max":
@@ -297,8 +333,8 @@ func (c Config) Validate() error {
 	if hi > maxWeightRatio*lo {
 		return fmt.Errorf("config: topic weights differ by more than %d:1", maxWeightRatio)
 	}
-	if c.Concurrency < 1 {
-		return errors.New("config: concurrency must be at least 1")
+	if c.Concurrency < 1 || c.Concurrency > MaxConcurrency {
+		return fmt.Errorf("config: concurrency must be between 1 and %d", MaxConcurrency)
 	}
 	if n := utf8.RuneCountInString(c.Profile); n > MaxProfileChars {
 		return fmt.Errorf("config: profile is %d characters; keep it to %d", n, MaxProfileChars)
