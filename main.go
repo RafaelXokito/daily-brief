@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
+	"runtime/debug"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,6 +20,11 @@ import (
 	"github.com/RafaelXokito/daily-brief/internal/keychain"
 	"github.com/RafaelXokito/daily-brief/internal/tui"
 )
+
+// version is the release tag, set at build time by
+// -ldflags "-X main.version=v1.2.3". Builds without it fall back to the
+// module version Go records (see buildVersion).
+var version = ""
 
 func main() {
 	if err := run(); err != nil {
@@ -32,6 +39,7 @@ const usage = `Usage:
   daily-brief auth set-key     store an Anthropic API key in the macOS Keychain
   daily-brief auth delete-key  remove it
   daily-brief auth status      show which provider and credentials are configured
+  daily-brief version          print the version (same as -version)
 
 Flags:
 `
@@ -49,8 +57,13 @@ func run() error {
 		print      = flag.Bool("print", false, "print the journal instead of opening the TUI: rendered on a terminal, Markdown when piped")
 		edit       = flag.Bool("edit", false, "open the config file in $EDITOR")
 		provider   = flag.String("provider", "", "connection to use for this run: claude-code, anthropic, aws or vertex (overrides config)")
+		showVer    = flag.Bool("version", false, "print the version and exit")
 	)
 	args := parseArgs()
+	if *showVer || args[0] == "version" {
+		fmt.Println(versionString())
+		return nil
+	}
 
 	cfg, created, err := config.Load(*configPath)
 	if err != nil {
@@ -390,4 +403,47 @@ func firstNonEmpty(s ...string) string {
 		}
 	}
 	return ""
+}
+
+// buildVersion is the -X main.version value, or else the module version from
+// the build info: a tag for `go install …@v1.2.3`, a pseudo-version for
+// other module builds, or "(devel)" for a plain `go build`.
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return "(devel)"
+}
+
+var releaseRE = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
+// isRelease reports whether v is a plain release tag like v1.2.3, not a
+// pre-release, pseudo-version, dirty build or "(devel)".
+func isRelease(v string) bool { return releaseRE.MatchString(v) }
+
+// releaseVersion returns this binary's version and whether it is a release
+// build, which self-update can compare against the latest release.
+func releaseVersion() (string, bool) {
+	v := buildVersion()
+	return v, isRelease(v)
+}
+
+// versionString is the `daily-brief version` output: "daily-brief v1.2.3"
+// for a release, "daily-brief dev (<version>)" otherwise, or just
+// "daily-brief dev" when Go recorded no version.
+func versionString() string {
+	return formatVersion(releaseVersion())
+}
+
+func formatVersion(v string, release bool) string {
+	if release {
+		return "daily-brief " + v
+	}
+	if v == "(devel)" {
+		return "daily-brief dev"
+	}
+	return "daily-brief dev (" + v + ")"
 }

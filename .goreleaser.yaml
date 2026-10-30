@@ -1,0 +1,48 @@
+# Builds the release archives for a pushed v* tag (see
+# .github/workflows/release.yml). Try it locally with
+# `goreleaser release --snapshot --clean`.
+version: 2
+
+project_name: daily-brief
+
+before:
+  hooks:
+    - go mod tidy -diff
+
+builds:
+  - main: .
+    binary: daily-brief
+    env:
+      # Pure Go: the macOS Keychain is reached through /usr/bin/security.
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      # {{.Version}} drops the tag's leading v; main.version keeps it (v1.2.3).
+      - -s -w -X main.version=v{{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "(?i)^readme"

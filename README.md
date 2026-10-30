@@ -11,17 +11,22 @@ can catch up on what matters in under about 10 minutes.
 
 ## Requirements
 
-- Go 1.26+
+- Go 1.26+, only to build from source or use `go install`
 - Claude Code installed and logged in. The default provider uses your
   Claude subscription, so no API key is needed.
 - macOS or Linux
 
 ## Install
 
+Download the archive for your system from
+[GitHub Releases](https://github.com/RafaelXokito/daily-brief/releases)
+(macOS or Linux, amd64 or arm64), then unpack it and put the binary on
+your `PATH`:
+
 ```sh
-git clone git@github.com:RafaelXokito/daily-brief.git
-cd daily-brief
-go build -o daily-brief .
+tar xzf daily-brief_*_darwin_arm64.tar.gz
+xattr -c daily-brief            # macOS: clear the browser download quarantine
+mkdir -p ~/.local/bin && mv daily-brief ~/.local/bin/   # or any directory on your PATH
 ```
 
 Or with `go install`:
@@ -30,9 +35,15 @@ Or with `go install`:
 go install github.com/RafaelXokito/daily-brief@latest
 ```
 
-While the repo is private, `go install` needs `GOPRIVATE=github.com/RafaelXokito`
-and SSH access to GitHub (for example `git config --global
-url."git@github.com:".insteadOf "https://github.com/"`).
+Or build from source:
+
+```sh
+git clone https://github.com/RafaelXokito/daily-brief.git
+cd daily-brief
+go build -o daily-brief .
+```
+
+`daily-brief version` prints the installed version.
 
 ## Quick start
 
