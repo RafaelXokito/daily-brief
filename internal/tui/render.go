@@ -89,13 +89,15 @@ var renderers = struct {
 // sanitise removes from the Markdown, so its text can never be mistaken
 // for one: a link is tokStart, its number, tokEnd and tokPad up to the
 // width of its text; a blockquote paragraph is its number between two
-// quoteMark; itemMark starts each item's first line.
+// quoteMark; itemMark starts each item's first line; hyphenMark stands for
+// a hyphen in text (see protectHyphens).
 const (
-	tokStart  = '\uE000'
-	tokPad    = '\uE001'
-	tokEnd    = '\uE002'
-	quoteMark = '\uE003'
-	itemMark  = '\uE004'
+	tokStart   = '\uE000'
+	tokPad     = '\uE001'
+	tokEnd     = '\uE002'
+	quoteMark  = '\uE003'
+	itemMark   = '\uE004'
+	hyphenMark = '\uE005'
 )
 
 // entityRE matches HTML character references: numeric, decimal or hex,
@@ -114,7 +116,7 @@ func sanitise(md string) string {
 		return ref
 	})
 	return strings.Map(func(r rune) rune {
-		if r >= tokStart && r <= itemMark {
+		if r >= tokStart && r <= hyphenMark {
 			return -1
 		}
 		return r
@@ -142,7 +144,7 @@ func unsafeEntity(ref string) bool {
 		decoded = html.UnescapeString(ref)
 	}
 	return strings.ContainsFunc(decoded, func(r rune) bool {
-		return (r >= tokStart && r <= itemMark) || brief.StripControl(string(r)) == ""
+		return (r >= tokStart && r <= hyphenMark) || brief.StripControl(string(r)) == ""
 	})
 }
 
@@ -271,6 +273,7 @@ func renderItems(md string, width int, theme string, items []int, tags map[int]b
 		}
 		out = strings.Join(lines, "\n")
 	}
+	out = strings.ReplaceAll(out, string(hyphenMark), "-")
 	lines := strings.Split(fitLines(links.restore(out), width), "\n")
 	var starts []int
 	for i, l := range lines {
@@ -677,9 +680,77 @@ func preRender(md string, width int, theme string, items []int, tags map[int]boo
 			return linkText(u, "") + trail
 		})
 	}
-	text, quotes := extractQuotes(strings.Join(lines, "\n"))
+	text, quotes := extractQuotes(protectHyphens(strings.Join(lines, "\n"), limit))
 	return text, ls, quotes
 }
+
+var (
+	// fenceRE matches a line that opens or closes a fenced code block.
+	fenceRE = regexp.MustCompile("^\\s*(```|~~~)")
+	// hyphenSyntaxRE matches lines whose hyphens are Markdown: a table's
+	// delimiter row, a thematic break, a setext underline.
+	hyphenSyntaxRE = regexp.MustCompile(`^[\s>]*(?:\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?|(?:-[ \t]*){3,})\s*$`)
+	// lineLeadRE matches a line's indent, blockquote markers and list
+	// markers, however many are nested.
+	lineLeadRE = regexp.MustCompile(`^[\s>]*(?:(?:[-*+]|\d+[.)])[ \t]+[\s>]*)*`)
+	wordRE     = regexp.MustCompile(`\S+`)
+)
+
+// protectHyphens puts hyphenMark in place of each hyphen between two
+// letters or digits in text, outside fenced code blocks and Markdown
+// syntax, to be put back once glamour is done. Glamour wraps paragraphs
+// and headings with reflow's wordwrap, which breaks lines after a hyphen
+// but does not count the hyphen's cell: each hyphen on a line lets it run
+// a cell past the width, and glamour's document margin then wraps it
+// again, at the width, leaving its last word or two alone on a line.
+// Without hyphens to break at, words wrap whole, at spaces, and lines keep
+// to the width.
+//
+// Hyphens that are, or are next to, Markdown stay: an escaped "\-", one
+// beside emphasis such as "_x_-y", list markers. So do the hyphens of a
+// word that holds a link's destination, a reference definition, an anchor
+// or a path ("](", "]:", a leading "[", "#", "/"), or that a linkifier
+// would turn into a link ("www.", "@", "://"), since glamour shows those
+// as they are, URL-encoded; and of a word wider than limit, the narrowest
+// line, which can only wrap at its hyphens.
+func protectHyphens(md string, limit int) string {
+	lines := strings.Split(md, "\n")
+	fence := ""
+	for i, l := range lines {
+		if m := fenceRE.FindStringSubmatch(l); m != nil {
+			switch fence {
+			case "":
+				fence = m[1]
+			case m[1]:
+				fence = ""
+			}
+			continue
+		}
+		if fence != "" || !strings.Contains(l, "-") || hyphenSyntaxRE.MatchString(l) ||
+			strings.Contains(l, "<!--") || strings.Contains(l, "-->") {
+			continue
+		}
+		n := len(lineLeadRE.FindString(l))
+		lines[i] = l[:n] + wordRE.ReplaceAllStringFunc(l[n:], func(w string) string {
+			if !strings.Contains(w, "-") || strings.HasPrefix(w, "[") || ansi.StringWidth(w) > limit ||
+				strings.ContainsAny(w, "#/@") || strings.Contains(w, "](") || strings.Contains(w, "]:") ||
+				strings.Contains(w, "www.") {
+				return w
+			}
+			rs := []rune(w)
+			for j := 1; j+1 < len(rs); j++ {
+				if rs[j] == '-' && isAlnum(rs[j-1]) && isAlnum(rs[j+1]) {
+					rs[j] = hyphenMark
+				}
+			}
+			return string(rs)
+		})
+	}
+	return strings.Join(lines, "\n")
+}
+
+// isAlnum reports whether r is a letter or a digit.
+func isAlnum(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 
 // tagLine shows a line that starts with an impact tag (see
 // brief.SplitTag) with a badge in its place: ACT in the accent of urgency,
