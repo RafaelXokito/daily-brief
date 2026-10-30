@@ -324,8 +324,9 @@ func TestAssessFirstPassMatchesAPILoopWithHistory(t *testing.T) {
 }
 
 // History leaves the default config's baseline and plan as they were
-// (claude-code: 740k, ~663k planned spend, 13 searches, 38 items; the API
-// baseline was 1.489M), and Assess reads no journals.
+// (claude-code: 740k, ~663k planned spend, 13 searches; the API baseline
+// was 1.489M), and Assess reads no journals. The default 9 minutes allow 41
+// items beside the 180-word overview (8 minutes and 90 words allowed 38).
 func TestDefaultAssessUnchangedByHistory(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	cfg := config.Default()
@@ -335,7 +336,7 @@ func TestDefaultAssessUnchangedByHistory(t *testing.T) {
 	ResolveBudget(&cfg)
 	a := Assess(cfg)
 	near := func(got, want int64) bool { return got >= want*98/100 && got <= want*102/100 }
-	if a.Baseline != 740_000 || !near(a.Spend, 663_228) || a.Searches != 13 || a.Items != 38 || a.Level != LevelOK {
+	if a.Baseline != 740_000 || !near(a.Spend, 663_228) || a.Searches != 13 || a.Items != 41 || a.Level != LevelOK {
 		t.Errorf("default Assess: baseline %d, spend %d, %d searches, %d items, %s", a.Baseline, a.Spend, a.Searches, a.Items, a.Level)
 	}
 	api := config.Default()

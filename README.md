@@ -2,7 +2,8 @@
 
 A terminal journal of today's news on the topics you care about. Claude
 researches each topic with web search within a token budget you set, then
-writes a short digest per topic plus a "Today's highlights" overview.
+writes a short digest per topic plus a "Today's highlights" overview: what
+to act on, what is worth knowing, and how each topic fared.
 
 ## Setup
 
@@ -49,7 +50,8 @@ or the advisory task budget.
 ```yaml
 token_budget: 0             # tokens per journal: a target and a cap kept by a safety margin; 0 = auto (recommended baseline)
 max_searches_per_topic: 0   # optional cap per research pass; 0 = derived from the budget
-max_read_minutes: 8         # the journal stays short enough to read in this many minutes
+max_read_minutes: 9         # the journal stays short enough to read in this many minutes
+theme: auto                 # auto | dark | light: the TUI's and -print's colours
 history_days: 3             # earlier days' journals not to repeat (0-14); 0 = off
 concurrency: 3              # topics researched in parallel
 model: claude-opus-5-5
@@ -256,8 +258,44 @@ words of allowance). A preamble gets little room. A single item, a preamble
 or a digest with no recognisable items that is too long on its own is cut at
 a sentence end and marked "…". A Related label left with nothing after it is
 removed, however it is spelled. A topic never lists more sources than it has
-items. The overview is capped in code at 5 bullets and about 90 words. The
-estimated reading time appears in the TUI header.
+items. The overview is capped in code at 6 highlights and about 180 words,
+its numbers and status lines included (see below), or a third of the cap
+when that is less (76 words at 1 minute), so at the default 9 minutes there
+is room for 41 items with 5 topics, and even 1 minute leaves room for a few.
+The config is rejected when `max_read_minutes` leaves no room for a single
+item across all topics. The estimated reading time
+appears in the TUI header.
+
+### The overview
+
+The overview prompt asks for JSON only (no forced tool use or structured
+output, so the API and `claude-code` share one prompt and one tolerant
+parser):
+
+```json
+{"highlights":[{"tier":"act","topic":"Security","headline":"<the item's headline>","text":"≤18 words","why":"≤14 words"}]}
+```
+
+`act` is for security actions and deadlines, `know` for what is worth
+knowing; new stories are preferred over updates unless an update is major.
+In code, the first JSON object of the reply with highlights is taken (code
+fences and prose around it are fine), and each highlight must name a
+finished topic and one of its items (the item with that very headline, else
+compared as words, either headline starting with the other); others are
+dropped. `act` goes first, at most 6 are kept, and text and why are made
+plain (links become their text; URLs, control characters and leading `#`,
+`>` and backticks are removed) and cut to their word limits and 160
+characters. They are saved in the journal as the overview's `highlights`, and its
+Markdown (for `-print` and the reading time) is built from them, each with a
+link to its item's source. Two lines are added in code at no token cost: a
+numbers line (`12 items · 2 updates · 5 topics · ~7 min`) and a status line
+per topic (`Java & Quarkus — 3 items, 1 update`, `AI — quiet day`); with
+many topics the status lines are left out rather than the highlights.
+Highlights are dropped from the end until the whole fits about 180 words. A
+reply in prose falls back to its first 5 bullets, made plain the same way,
+and the overview then has no highlights. A reply that looks like JSON but
+doesn't decode (cut off or mistyped) gets neither: the overview is just the
+numbers and status lines, never raw JSON.
 
 Research passes are told to strongly prefer primary sources (vendor
 advisories, release notes, official blogs, CISA/NVD, regulator or company
@@ -330,7 +368,7 @@ the prompt really sent, and `daily-brief budget` plans each first request at
 | `daily-brief -topics "AI,Security"` | Research only some topics and merge them into today's journal |
 | `daily-brief -provider anthropic` | Use a different connection for this run |
 | `daily-brief auth set-key` / `delete-key` / `status` | Manage the Keychain API key, check credentials |
-| `daily-brief -print` | Print Markdown to stdout (good for scripts / cron) |
+| `daily-brief -print` | Print the journal: rendered as in the TUI on a terminal, Markdown exactly as saved when piped (good for scripts / cron) |
 
 Flags can go before or after a subcommand: `daily-brief budget -budget 1000000`
 and `daily-brief auth status -provider aws` both work.
@@ -344,18 +382,30 @@ as `↑/↓`, which scroll the Summary.
 | Key | Action |
 | --- | --- |
 | `←` `h` | focus Topics |
-| `→` `l` `enter` | focus Summary |
+| `→` `l` | focus Summary |
+| `enter` | Topics: focus Summary. Overview: go to the selected highlight |
+| `⌫` (backspace) | back to the Overview, with the same highlight selected |
 | `tab` `shift+tab` | switch pane |
-| `↑` `k` / `↓` `j` | Topics: previous / next topic (wraps; doesn't leave Topics). Summary: scroll a line |
+| `↑` `k` / `↓` `j` | Topics: previous / next topic (wraps; doesn't leave Topics). Overview: previous / next highlight. Summary: scroll a line |
 | `space` `pgdown` `f` `shift+↓` | page down |
 | `b` `pgup` `shift+↑` | page up |
 | `d` `ctrl+d` / `u` `ctrl+u` | half page down / up |
 | `g` `home` / `G` `end` | top / bottom |
 | `1`–`9` | jump to the section at that position (`1` = Overview) |
+| `o` | open the source of the selected highlight's item, the item `enter` went to, or the item at the top of the Summary, in the browser (`open`, or `xdg-open`); only http(s) links are opened, others show "No web link" |
+| `y` | copy that item as plain text, with its link: `pbcopy` on a Mac outside SSH, else OSC 52 (up to about 75 KB); the help line shows "Copied" only once it was sent |
+| `z` | reader mode: hide Topics and use the full width (`z` again, or `←`/`tab`/`esc`, brings Topics back) |
 | `?` | show or close the list of keys |
 | `esc` | close the list of keys, or focus Topics |
 | `r` | regenerate |
 | `q` `ctrl+c` | quit |
+
+On the Overview with the Summary focused, `↑/↓` move a cursor over the
+highlights (grouped under "Act now" and "Worth knowing", each with its text,
+a muted why and its topic) and `enter` opens that topic scrolled to the
+item's heading, found by its exact headline among the item headings, or at
+the top if the item is no longer there. Paging still
+scrolls. `b` stays page up; `⌫` goes back.
 
 The scrolling keys work in either pane, and every key except `r` works while a
 journal is being generated (`r` waits for the run to finish). Quitting mid-run
@@ -368,6 +418,49 @@ ignored while it is open. In a terminal smaller than 50×10 the Topics pane is
 hidden and the header names the topic shown; below 20×4 the TUI only says the
 terminal is too small. With more topics than fit, the Topics pane scrolls to
 keep the selected one in view.
+
+### Rendering
+
+Topics are rendered as Markdown with glamour, in a style derived from its
+dark or light style: headings without `#` marks (topic names in the accent
+colour, item headlines bold with space above), a margin of one cell, updates
+as `↻ Update · …`, a Related label as a rule and a small "Related" heading,
+and each source as its title and domain. Digests come from web pages
+through the model, so they are treated as hostile. Control characters (C0
+but newline and tab, DEL and C1), which a terminal could act on, and the
+invisible characters that reorder or hide text (bidi controls such as
+U+202E, zero-width spaces, word joiners; the zero-width joiner emoji need
+is kept) are removed where the model's output enters the journal, so saved
+and piped journals are clean, and again before rendering. So are HTML
+character references that would decode into one, such as `&#27;` or
+`&#x202E;`, which Markdown decodes after that. As a last guard, the
+rendered output, the Overview's list and `-print` on a terminal keep only
+colour (SGR) sequences and the app's own OSC 8 hyperlinks; any other escape
+sequence, BEL, backspace, carriage return, DEL and C1 is dropped. Only
+http(s) links with a host become OSC 8 hyperlinks (Ghostty, WezTerm and
+Kitty open them on click), without any `user@` part, so
+`https://good.com@evil.com` links to and shows evil.com; a host with control
+or invisible characters is not linked. An inline `[source](…)` link or a
+bare URL shows as `↗ domain` (without `www.`), or `↗ link`, any other link
+as its text. A domain with non-ASCII characters shows as punycode, so a
+lookalike such as `аpple.com` (Cyrillic `а`) shows as `↗ xn--pple-43d.com`,
+in the Sources list too. A link with
+another scheme (`javascript:`, `file:`, …) shows only its text, unlinked. No
+raw URL is shown, and URLs with balanced parentheses, as Wikipedia's, link
+in full. Each link is replaced by a placeholder of its text's width, made of
+private-use characters removed from the Markdown beforehand, before glamour
+wraps the text and restored after, so a link never breaks across lines; one
+too long for a line is hard-wrapped with its hyperlink closed and reopened
+on each line. Notes and warnings keep their `│` bar on every line
+they wrap to, and no line is wider than the pane. This is display only: the
+saved Markdown is unchanged. The Overview with highlights is drawn by the
+TUI itself, so each highlight is a known set of lines.
+
+`theme: auto` uses `GLAMOUR_STYLE` if it is `light`, or `dark` (or another
+dark glamour style), and otherwise asks the terminal for its background
+before the TUI starts; `dark` and `light` force one. The TUI's own colours
+follow it. `-print` on a terminal renders the same way at the terminal's
+width; piped, it writes the journal's Markdown byte for byte.
 
 Journals are saved as JSON in `~/.local/share/daily-brief/journals/`. A journal
 in which no topic was summarized isn't saved, and a saved one like that is

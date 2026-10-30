@@ -77,6 +77,9 @@ type Config struct {
 	Model       string `yaml:"model"`
 	// Effort is one of low, medium, high, xhigh, max.
 	Effort string `yaml:"effort"`
+	// Theme is the TUI's colours: auto (GLAMOUR_STYLE if set, else the
+	// terminal's background), dark or light.
+	Theme string `yaml:"theme"`
 	// Location biases search results (e.g. "Lisbon, Portugal"). Optional.
 	Country string  `yaml:"country,omitempty"`
 	City    string  `yaml:"city,omitempty"`
@@ -90,13 +93,14 @@ func Default() Config {
 	return Config{
 		Provider:           Provider{Type: "claude-code"},
 		Concurrency:        3,
-		MaxReadMinutes:     8,
+		MaxReadMinutes:     9,
 		HistoryDays:        3,
 		PriceInputPerMTok:  4,
 		PriceOutputPerMTok: 20,
 		PricePer1KSearches: 10,
 		Model:              "claude-opus-5-5",
 		Effort:             "medium",
+		Theme:              "auto",
 		Topics: []Topic{
 			{Name: "Java & Quarkus", Focus: "OpenJDK releases and JEPs, Quarkus releases and features, Jakarta EE, Spring, GraalVM, notable JVM library updates and ecosystem news."},
 			{Name: "Security", Focus: "Critical or actively exploited CVEs, supply-chain attacks on package registries (Maven Central, npm, PyPI, crates.io), vulnerabilities in programming languages, runtimes, frameworks and developer tools. Say who is affected and what to do."},
@@ -161,6 +165,7 @@ func Save(path string, cfg Config) error {
 		"# max_read_minutes: the journal is kept short enough to read in this many minutes.\n" +
 		"# history_days: earlier days' journals (0-14) whose items are not repeated unless they have a material\n" +
 		"#               new development, then shown as an update; 0 = off.\n" +
+		"# theme: auto (GLAMOUR_STYLE if set, else the terminal's background), dark or light.\n" +
 		"# price_*: USD prices used only to estimate the cost of API runs.\n" +
 		"# weight: optional per-topic multiplier for its share of the budget.\n"
 	return os.WriteFile(path, append([]byte(header), data...), 0o644)
@@ -182,6 +187,9 @@ func (c Config) Validate() error {
 	if c.MaxReadMinutes < 1 {
 		return errors.New("config: max_read_minutes must be at least 1")
 	}
+	if n := max(len(c.Topics), len(c.AllTopics)); ReadableItems(c.MaxReadMinutes, n) == 0 {
+		return fmt.Errorf("config: max_read_minutes %d leaves no room for a single item across %d topics; raise it or remove topics", c.MaxReadMinutes, n)
+	}
 	if c.HistoryDays < 0 || c.HistoryDays > 14 {
 		return errors.New("config: history_days must be between 0 (off) and 14")
 	}
@@ -192,6 +200,11 @@ func (c Config) Validate() error {
 	case "low", "medium", "high", "xhigh", "max":
 	default:
 		return fmt.Errorf("config: unknown effort %q", c.Effort)
+	}
+	switch c.Theme {
+	case "", "auto", "dark", "light":
+	default:
+		return fmt.Errorf("config: theme must be auto, dark or light, not %q", c.Theme)
 	}
 	if err := c.Provider.Validate(); err != nil {
 		return err
@@ -220,6 +233,29 @@ func (c Config) Validate() error {
 		return errors.New("config: concurrency must be at least 1")
 	}
 	return nil
+}
+
+// The reading-time model behind max_read_minutes, which brief's item caps
+// follow.
+const (
+	ReadingWPM   = 230
+	WordsPerItem = 45 // headline plus at most two tight sentences
+	// OverviewWords is the most the overview's highlights, numbers and
+	// status lines take; shorter reading caps give it a third of them.
+	OverviewWords = 180
+	// Words a Related label may add to a topic beside its items.
+	RelatedAllowance = 3
+)
+
+// OverviewAllowance is the overview's share of a reading cap of minutes.
+func OverviewAllowance(minutes int) int {
+	return min(OverviewWords, minutes*ReadingWPM/3)
+}
+
+// ReadableItems is how many items fit in minutes beside the overview and
+// each of topics' Related label.
+func ReadableItems(minutes, topics int) int {
+	return max(0, (minutes*ReadingWPM-OverviewAllowance(minutes)-topics*RelatedAllowance)/WordsPerItem)
 }
 
 // FilterTopics keeps only topics whose names match one of names

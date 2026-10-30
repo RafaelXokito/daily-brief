@@ -46,12 +46,13 @@ const (
 	// Narrow passes run when a run would end below this share.
 	narrowBelow = 0.9
 
-	wordsPerItem  = 45 // headline plus at most two tight sentences
-	overviewWords = 90 // 3-5 one-line bullets, enforced by capOverview
-	// Words a Related label may add to a topic beside its items.
-	relatedAllowance   = 3
-	maxOverviewBullets = 5
-	readingWPM         = 230
+	wordsPerItem = config.WordsPerItem
+	// The most the overview's highlights plus its numbers and status lines
+	// take, enforced by capOverview; see overviewAllowance.
+	overviewWords      = config.OverviewWords
+	relatedAllowance   = config.RelatedAllowance
+	maxOverviewBullets = 5 // in an overview whose reply was not JSON
+	readingWPM         = config.ReadingWPM
 	minTopicItems      = 2
 	maxTopicItems      = 10
 	minSearchItems     = 3
@@ -193,8 +194,13 @@ func itemCeiling(searches int64) int {
 // totalItems is how many items fit in max_read_minutes beside the overview
 // and each topic's Related label.
 func totalItems(cfg config.Config) int {
-	return max(0, (cfg.MaxReadMinutes*readingWPM-overviewWords-len(cfg.Topics)*relatedAllowance)/wordsPerItem)
+	return config.ReadableItems(cfg.MaxReadMinutes, len(cfg.Topics))
 }
+
+// overviewAllowance is the overview's words within a reading cap of
+// minutes: overviewWords, or a third of the cap when that is less, so a
+// one-minute journal still has room for items.
+func overviewAllowance(minutes int) int { return config.OverviewAllowance(minutes) }
 
 // itemCaps splits the reading-time cap into a per-topic item cap: each
 // topic gets a floor of 2 items (1 when that does not fit), and the rest is
@@ -490,7 +496,7 @@ func Assess(cfg config.Config) Assessment {
 		a.RunSearches += run.Sections[i].Searches
 		a.Items += countItems(run.Sections[i].Markdown)
 	}
-	a.ReadMinutes = float64(a.Items*wordsPerItem+overviewWords) / readingWPM
+	a.ReadMinutes = float64(a.Items*wordsPerItem+overviewAllowance(cfg.MaxReadMinutes)) / readingWPM
 	if !a.Subscription {
 		tokens := float64(a.Spend)
 		a.CostUSD = tokens*(1-outputShare)*cfg.PriceInputPerMTok/1e6 +

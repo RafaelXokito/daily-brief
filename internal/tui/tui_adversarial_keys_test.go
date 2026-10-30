@@ -519,8 +519,12 @@ func TestOverlayShowsEveryBindingByScrolling(t *testing.T) {
 	// At 80 columns every description is beside its key, uncut.
 	m := newSized(journals()["long"], 80, 24)
 	m.Update(runes("?"))
+	top := m.View()
+	m.Update(runes("G"))
+	both := top + "\n" + m.View()
+	m.Update(runes("g"))
 	for _, b := range keys.all() {
-		if !strings.Contains(m.View(), keyNames(b)+strings.Repeat(" ", 2)) {
+		if !strings.Contains(both, keyNames(b)+strings.Repeat(" ", 2)) {
 			t.Errorf("80x24: %q is not in the key column", keyNames(b))
 		}
 		if lipgloss.Width(b.Help().Desc) > 22 {
@@ -543,7 +547,7 @@ func TestOverlayShowsEveryBindingByScrolling(t *testing.T) {
 
 func TestAdv_HelpLineFitsEveryWidth(t *testing.T) {
 	for w := 0; w <= 160; w++ {
-		for _, focus := range []pane{focusSummary, focusTopics} {
+		for _, focus := range []helpMode{modeSummary, modeTopics, modeHighlights, modeItems, modeItemsBack} {
 			for _, gen := range []bool{false, true} {
 				l := helpLine(focus, gen, w)
 				if lipgloss.Width(l) > w {
@@ -600,7 +604,7 @@ func TestAdv_KeysWhileStreaming(t *testing.T) {
 	m.Update(runes("?"))
 	for _, i := range []int{-1, 1, 2} {
 		fake(i, brief.StatusRunning)
-		if !m.showHelp || !strings.Contains(m.View(), keys.Regenerate.Help().Desc) {
+		if !m.showHelp || !strings.Contains(m.View(), keys.Up.Help().Desc) {
 			t.Errorf("update %d closed the overlay", i)
 		}
 	}

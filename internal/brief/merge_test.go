@@ -125,7 +125,9 @@ func TestFilteredRunRegeneratesOverviewFromMergedSections(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved, _ := LoadJournal(Today())
-	if len(saved.Sections) != 3 || saved.Sections[1].Markdown != "### New B" || saved.Overview.Markdown != "## Today's highlights\n\n- new" || saved.Overview.Stale {
+	if len(saved.Sections) != 3 || saved.Sections[1].Markdown != "### New B" || saved.Overview.Stale ||
+		!strings.Contains(saved.Overview.Markdown, "- new") || !strings.Contains(saved.Overview.Markdown, "3 items · 0 updates · 3 topics") ||
+		!strings.Contains(saved.Overview.Markdown, "- A — 1 item\n- B — 1 item\n- C — 1 item") {
 		t.Errorf("saved %d sections, B %q, overview %q stale %v", len(saved.Sections), saved.Sections[1].Markdown, saved.Overview.Markdown, saved.Overview.Stale)
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ topics:
 	if err != nil {
 		t.Fatalf("legacy config rejected: %v", err)
 	}
-	if cfg.TokenBudget != 400_000 || cfg.MaxReadMinutes != 8 || cfg.Concurrency != 3 || cfg.Provider.Type != "claude-code" ||
+	if cfg.TokenBudget != 400_000 || cfg.MaxReadMinutes != 9 || cfg.Theme != "auto" || cfg.Concurrency != 3 || cfg.Provider.Type != "claude-code" ||
 		cfg.PriceInputPerMTok != 4 || cfg.MaxSearchesPerTopic != 0 || len(cfg.Topics) != 2 || cfg.Topics[1].Weight != 0 {
 		t.Errorf("legacy config loaded as %+v", cfg)
 	}
@@ -63,6 +64,7 @@ func TestLoadRejectsInvalidLegacyValues(t *testing.T) {
 		"  - name: B\n    weight: .nan\n":                "not a number",
 		"  - name: B\n    weight: .inf\n":                "not a number",
 		"  - name: B\n    weight: 1001\n":                "1000:1",
+		"theme: solarized\n":                             "theme",
 	}
 	for extra, want := range cases {
 		_, err := loadYAML(t, base+extra)
@@ -145,5 +147,39 @@ func TestHistoryDays(t *testing.T) {
 		if _, err := loadYAML(t, "history_days: "+bad+"\ntopics:\n  - name: A\n"); err == nil || !strings.Contains(err.Error(), "history_days") {
 			t.Errorf("history_days %s accepted: %v", bad, err)
 		}
+	}
+}
+
+func TestThemeValues(t *testing.T) {
+	for _, theme := range []string{"auto", "dark", "light"} {
+		if _, err := loadYAML(t, "theme: "+theme+"\ntopics:\n  - name: A\n"); err != nil {
+			t.Errorf("theme %q rejected: %v", theme, err)
+		}
+	}
+	cfg := Default()
+	cfg.Theme = "Dark"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "theme") {
+		t.Errorf("theme Dark: err %v", err)
+	}
+}
+
+// max_read_minutes must leave room for at least one item: one minute does
+// for a few topics, not for many.
+func TestReadingCapLeavesAnItem(t *testing.T) {
+	cfg := Default()
+	cfg.MaxReadMinutes = 1
+	if err := cfg.Validate(); err != nil || ReadableItems(1, len(cfg.Topics)) < 1 {
+		t.Errorf("1 minute, %d topics: err %v, %d items", len(cfg.Topics), err, ReadableItems(1, len(cfg.Topics)))
+	}
+	cfg.Topics = nil
+	for i := range 60 {
+		cfg.Topics = append(cfg.Topics, Topic{Name: fmt.Sprint("T", i)})
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "max_read_minutes") {
+		t.Errorf("1 minute, 60 topics: err %v", err)
+	}
+	cfg.MaxReadMinutes = 2
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("2 minutes, 60 topics: err %v", err)
 	}
 }

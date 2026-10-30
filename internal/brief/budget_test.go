@@ -67,7 +67,7 @@ func TestAssess(t *testing.T) {
 		{"api low", testConfig("anthropic", 0, "A", "B", "C"), 0.4, LevelLow, "too low"},
 		{"cc low", testConfig("claude-code", 0, "A", "B", "C"), 0.4, LevelLow, "too low"},
 		{"light topic under one search", lopsided, 1, LevelOK, `topic "B" has too small a weight`},
-		{"api high", testConfig("anthropic", 0, "A", "B", "C"), 2.5, LevelHigh, "stays capped at ~8 min"},
+		{"api high", testConfig("anthropic", 0, "A", "B", "C"), 2.5, LevelHigh, "stays capped at ~9 min"},
 		{"cc very high", testConfig("claude-code", 0, "A", "B", "C"), 5, LevelVeryHigh, "very high"},
 		{"api costly", expensive, 1, LevelCostly, "estimated cost"},
 		{"api very high and costly", expensive, 5, LevelVeryHigh, "very high"},

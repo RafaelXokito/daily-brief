@@ -30,7 +30,17 @@ Format (Markdown, no top-level heading, no preamble or closing remarks):
 - Each item: "### <headline>" then at most 2 tight sentences on why it matters, ending with an inline link to the best source like [source](https://...).
 - If nothing notable happened, even in related areas, say so in one line.`
 
-const overviewSystemPrompt = `You write the opening of a personal morning briefing. Given digests for several topics, write "## Today's highlights" followed by 3-5 bullets naming the most important things across all topics, one line of at most 15 words each, most important first. Prefer new stories over updates to earlier ones (items headed "Update:") unless an update is major. Output Markdown only.`
+const overviewSystemPrompt = `You pick the highlights of a personal morning briefing. You are given digests for several topics: each topic starts with a line "# <topic>", and each item with its headline, usually a line "### <headline>".
+
+Reply with JSON only: no prose, no Markdown and no code fence. Use exactly this shape:
+{"highlights":[{"tier":"act","topic":"<exact topic name>","headline":"<exact item headline>","text":"<at most 18 words>","why":"<at most 14 words>"}]}
+
+Rules:
+- Pick 3-6 of the most important items across all topics, most important first. Use only items from the digests; never invent one.
+- tier is "act" for something to do: a security action such as patching, upgrading or rotating credentials, or a deadline. Otherwise tier is "know": worth knowing.
+- topic is the topic name exactly as given after "# ". headline is the item's headline exactly as written, without "### ".
+- text says what happened in at most 18 words. why says why it matters to me in at most 14 words.
+- Prefer new stories over updates to earlier ones (items headed "Update:") unless an update is major.`
 
 // historyInstruction follows the items earlier days' journals reported.
 const historyInstruction = `These were already in my journal on the dates shown. Do not repeat them. ` +
@@ -626,7 +636,8 @@ func (g *Generator) loadHistory(date string) map[string][]Reported {
 // marked as possibly stale.
 func (g *Generator) overview(ctx context.Context, j *Journal, others []*Section, send func(int, *Section)) {
 	ov := &j.Overview
-	input := overviewInput(combine(j.Sections, others))
+	sections := combine(j.Sections, others)
+	input := overviewInput(sections)
 	switch {
 	case ctx.Err() != nil:
 		ov.Status, ov.Error = StatusFailed, "cancelled"
@@ -638,7 +649,9 @@ func (g *Generator) overview(ctx context.Context, j *Journal, others []*Section,
 		ov.Status = StatusRunning
 		send(-1, ov)
 		apply(ov, g.backend.Summarize(ctx, overviewSystemPrompt, input))
-		ov.Markdown = capOverview(ov.Markdown)
+		if ov.Status == StatusDone {
+			ov.Markdown, ov.Highlights = capOverviewWithin(ov.Markdown, sections, overviewAllowance(g.cfg.MaxReadMinutes))
+		}
 	}
 	send(-1, ov)
 }
@@ -659,14 +672,16 @@ func overviewNeed(input string) int64 {
 	return int64(len(input)/3) + 4_000
 }
 
+// apply records a backend's result in sec, without control characters
+// (see StripControl): what is saved is clean, piped or not.
 func apply(sec *Section, res Result) {
 	sec.TokensUsed += res.Tokens
 	sec.Searches += res.Searches
 	sec.Truncated = res.Truncated
-	sec.Markdown, sec.Sources = res.Markdown, res.Sources
+	sec.Markdown, sec.Sources = StripControl(res.Markdown), cleanSources(res.Sources)
 	switch {
 	case res.Err != nil:
-		sec.Status, sec.Error = StatusFailed, res.Err.Error()
+		sec.Status, sec.Error = StatusFailed, StripControl(res.Err.Error())
 	case strings.TrimSpace(res.Markdown) == "":
 		sec.Status, sec.Error = StatusFailed, "no summary was produced within the token budget"
 	default:
@@ -684,7 +699,20 @@ func applyPass(sec *Section, res Result) {
 	if res.Err != nil || res.Truncated || strings.TrimSpace(res.Markdown) == "" {
 		return
 	}
-	sec.Markdown, sec.Sources, sec.Truncated, sec.Error = res.Markdown, res.Sources, false, ""
+	sec.Markdown, sec.Sources, sec.Truncated, sec.Error = StripControl(res.Markdown), cleanSources(res.Sources), false, ""
+}
+
+// cleanSources is sources without control characters in their titles and
+// URLs.
+func cleanSources(sources []Source) []Source {
+	if sources == nil {
+		return nil
+	}
+	out := make([]Source, len(sources))
+	for i, s := range sources {
+		out[i] = Source{Title: StripControl(s.Title), URL: StripControl(s.URL)}
+	}
+	return out
 }
 
 // capItems keeps a digest within n items, Related ones included, and
@@ -693,11 +721,13 @@ func applyPass(sec *Section, res Result) {
 // at a sentence if it alone is too long. A digest without recognisable
 // items is trimmed the same way. Non-empty input never comes back empty:
 // if trimming would leave nothing, as when a heading alone is longer than
-// the budget, the first line itself is cut and marked.
+// the budget, the first line itself is cut and marked. Control characters
+// are removed first (see StripControl).
 func capItems(md string, n int) string {
 	if n <= 0 {
 		return ""
 	}
+	md = StripControl(md)
 	blocks := splitDigest(md)
 	budget := n * wordsPerItem
 	hasItems := slices.ContainsFunc(blocks, func(b block) bool { return b.item })
@@ -751,6 +781,7 @@ func keepSome(out, md string, limit int) string {
 type block struct {
 	text        string
 	item, label bool
+	line        int // where it starts in the trimmed digest
 }
 
 // splitDigest splits a digest into blocks. Items start at "### " headings,
@@ -780,12 +811,12 @@ func splitDigest(md string) []block {
 		}
 		cur, text = next, []string{line}
 	}
-	for _, l := range lines {
+	for i, l := range lines {
 		switch {
 		case isRelated(l):
-			flush(block{label: true}, l)
+			flush(block{label: true, line: i}, l)
 		case start != nil && start(l):
-			flush(block{item: true}, l)
+			flush(block{item: true, line: i}, l)
 		default:
 			text = append(text, l)
 		}
@@ -894,22 +925,6 @@ func sentenceEnd(text string) int {
 		}
 	}
 	return 0
-}
-
-// capOverview keeps the overview to its heading, at most five bullets and
-// about overviewWords words.
-func capOverview(md string) string {
-	var out []string
-	bullets := 0
-	for _, l := range strings.Split(strings.TrimSpace(md), "\n") {
-		if isBullet(l) {
-			if bullets++; bullets > maxOverviewBullets {
-				break
-			}
-		}
-		out = append(out, l)
-	}
-	return strings.TrimSpace(trimWords(strings.Join(out, "\n"), overviewWords))
 }
 
 // pruneSources keeps no more sources than the digest has items.

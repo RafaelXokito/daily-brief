@@ -3,18 +3,24 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/term"
 
 	"github.com/rafaelpereira/daily-brief/internal/brief"
 )
@@ -36,6 +42,8 @@ var (
 	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	mutedStyle  = lipgloss.NewStyle().Foreground(muted)
 	selStyle    = lipgloss.NewStyle().Bold(true).Foreground(accent)
+	actStyle    = lipgloss.NewStyle().Bold(true).Foreground(errColor)
+	warnStyle   = lipgloss.NewStyle().Foreground(errColor)
 	sidebarBox  = lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderForeground(muted).PaddingRight(1)
 	helpStyle   = mutedStyle
 	statusStyle = lipgloss.NewStyle().Foreground(muted).Italic(true)
@@ -53,6 +61,12 @@ type updateMsg brief.Update
 
 type doneMsg struct{ err error }
 
+// clearFlashMsg ends the flash message with this id.
+type clearFlashMsg int
+
+// flashTime is how long a flash message replaces the help line.
+const flashTime = 2 * time.Second
+
 type Model struct {
 	gen        *brief.Generator
 	genErr     error          // why gen is nil, if it is
@@ -67,22 +81,103 @@ type Model struct {
 	focus      pane
 	sidebarTop int  // the first topic row shown when they don't all fit
 	showHelp   bool // the key list replaces the viewport
+	reader     bool // reader mode: no sidebar, the summary at full width
 	viewport   viewport.Model
 	keysView   viewport.Model // the key list, scrolled on its own
 	spinner    spinner.Model
-	glamStyle  string
+	theme      string
 	width      int
 	height     int
 	ready      bool
+
+	content string // the viewport's rendered lines
+	// cursor is the selected highlight on the Overview, in display order;
+	// hlLines is the first line of each highlight in content.
+	cursor  int
+	hlLines []int
+	// headings are where a topic's items and other headings start in
+	// content; item is the item Enter jumped to, or -1, while the viewport
+	// stays at itemAt.
+	headings     []heading
+	item, itemAt int
+	flash        string // replaces the help line for a moment
+	flashID      int
+
+	// open opens a URL in the browser and copy puts text on the
+	// clipboard; tests replace them.
+	open func(url string) error
+	copy func(text string) error
 }
 
 // New shows journal if it is non-nil, otherwise generates a fresh one.
 // gen may be nil when no connection could be set up (genErr says why); the
-// saved journal is then shown read-only.
-func New(gen *brief.Generator, genErr error, journal *brief.Journal, glamStyle string) *Model {
+// saved journal is then shown read-only. theme is "dark" or "light" (any
+// other name renders without colour).
+func New(gen *brief.Generator, genErr error, journal *brief.Journal, theme string) *Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(accent)
-	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, glamStyle: glamStyle}
+	return &Model{gen: gen, genErr: genErr, journal: journal, spinner: sp, theme: theme, item: -1, open: openURL, copy: copyText}
+}
+
+// openURL opens url with the system's opener, if it is an http(s) URL
+// (see brief.SafeWebURL); nothing else is handed to it.
+func openURL(raw string) error {
+	u, ok := brief.SafeWebURL(raw)
+	if !ok {
+		return errors.New("not a web link")
+	}
+	name := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		name = "open"
+	}
+	cmd := exec.Command(name, u)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
+	return nil
+}
+
+// Output is the terminal the TUI draws on, stdout, for tea.WithOutput:
+// its writes are serialised, and Bubble Tea writes each frame at once, so
+// the OSC 52 sequence copyText sends never lands inside a frame. (Bubble
+// Tea v1 has no command to write a raw sequence, and tea.Printf prints
+// nothing in the alternate screen.)
+var Output = &syncFile{File: os.Stdout}
+
+type syncFile struct {
+	mu sync.Mutex
+	*os.File
+}
+
+func (f *syncFile) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.File.Write(p)
+}
+
+// maxOSC52 is the most base64 copyText sends with OSC 52; terminals cap
+// what they accept at about this.
+const maxOSC52 = 75_000
+
+// copyText puts text on the clipboard: with pbcopy on a Mac outside SSH,
+// else with OSC 52 through Output, which works over SSH where the
+// terminal allows it.
+func copyText(text string) error {
+	if runtime.GOOS == "darwin" && os.Getenv("SSH_TTY") == "" {
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		return cmd.Run()
+	}
+	enc := base64.StdEncoding.EncodeToString([]byte(text))
+	switch {
+	case len(enc) > maxOSC52:
+		return errors.New("too long for the terminal's clipboard")
+	case !term.IsTerminal(int(Output.Fd())):
+		return errors.New("no terminal to copy through")
+	}
+	_, err := fmt.Fprintf(Output, "\x1b]52;c;%s\a", enc)
+	return err
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -130,16 +225,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		w, h := m.contentSize()
-		if !m.ready {
-			m.viewport = viewport.New(w, h)
-			m.keysView = viewport.New(w, h)
-			m.ready = true
-		} else {
-			m.viewport.Width, m.viewport.Height = w, h
+		m.resize()
+		return m, nil
+
+	case clearFlashMsg:
+		if int(msg) == m.flashID {
+			m.flash = ""
 		}
-		m.refresh()
-		m.refreshKeys()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -214,26 +306,43 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	list := m.focus == focusSummary && m.onHighlights()
 	switch {
 	case key.Matches(msg, keys.Help):
 		m.showHelp = true
 		m.keysView.GotoTop()
+	case key.Matches(msg, keys.Topics, keys.Esc, keys.Toggle) && m.reader:
+		// The Topics pane is hidden in reader mode: show it again.
+		m.reader = false
+		m.focus = focusTopics
+		m.resize()
 	case key.Matches(msg, keys.Topics, keys.Esc):
 		m.focus = focusTopics
 	case key.Matches(msg, keys.Summary):
 		m.focus = focusSummary
+	case key.Matches(msg, keys.Go):
+		if list {
+			m.jump()
+		}
+		m.focus = focusSummary
 	case key.Matches(msg, keys.Toggle):
 		m.focus = 1 - m.focus
 	case key.Matches(msg, keys.Up):
-		if m.focus == focusTopics {
+		switch {
+		case m.focus == focusTopics:
 			m.selectSection(m.selected - 1)
-		} else {
+		case list:
+			m.moveCursor(-1)
+		default:
 			m.viewport.ScrollUp(1)
 		}
 	case key.Matches(msg, keys.Down):
-		if m.focus == focusTopics {
+		switch {
+		case m.focus == focusTopics:
 			m.selectSection(m.selected + 1)
-		} else {
+		case list:
+			m.moveCursor(1)
+		default:
 			m.viewport.ScrollDown(1)
 		}
 	case key.Matches(msg, keys.PageDown):
@@ -252,6 +361,42 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if i := int(msg.String()[0] - '1'); i <= len(m.journal.Sections) {
 			m.selectSection(i)
 		}
+	case key.Matches(msg, keys.Back):
+		if m.selected != 0 {
+			m.selectSection(0)
+			m.focus = focusSummary
+			m.showCursor()
+		}
+	case key.Matches(msg, keys.Open):
+		it, ok := m.currentItem()
+		if !ok || it.URL == "" {
+			return m, m.flashMsg("No link to open here")
+		}
+		u, ok := brief.SafeWebURL(it.URL)
+		switch {
+		case !ok:
+			return m, m.flashMsg("No web link")
+		case m.open(u) != nil:
+			return m, m.flashMsg("Could not open ↗ " + brief.Domain(u))
+		}
+		return m, m.flashMsg("Opened ↗ " + brief.Domain(u))
+	case key.Matches(msg, keys.Copy):
+		it, ok := m.currentItem()
+		if !ok {
+			return m, m.flashMsg("No item to copy here")
+		}
+		text := brief.StripControl(brief.PlainText(it.Markdown))
+		if it.URL != "" {
+			text += "\n" + it.URL
+		}
+		if err := m.copy(text); err != nil {
+			return m, m.flashMsg("Could not copy: " + err.Error())
+		}
+		return m, m.flashMsg("Copied")
+	case key.Matches(msg, keys.Reader):
+		m.reader = !m.reader
+		m.focus = focusSummary
+		m.resize()
 	case key.Matches(msg, keys.Regenerate):
 		if m.gen == nil {
 			m.status = "Cannot regenerate: no connection to Claude"
@@ -266,6 +411,32 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// flashMsg shows s in place of the help line for a moment.
+func (m *Model) flashMsg(s string) tea.Cmd {
+	m.flash = brief.StripControl(s)
+	m.flashID++
+	id := m.flashID
+	return tea.Tick(flashTime, func(time.Time) tea.Msg { return clearFlashMsg(id) })
+}
+
+// resize fits the viewport and the key list to the terminal and layout.
+func (m *Model) resize() {
+	w, h := m.contentSize()
+	if !m.ready {
+		m.viewport = viewport.New(w, h)
+		m.keysView = viewport.New(w, h)
+		m.ready = true
+	} else {
+		m.viewport.Width, m.viewport.Height = w, h
+	}
+	m.refresh()
+	m.refreshKeys()
+	if line := m.itemLine(m.item); line >= 0 {
+		m.viewport.SetYOffset(line)
+		m.itemAt = m.viewport.YOffset
+	}
 }
 
 // savePartial saves the topics a run being quit has finished, if any.
@@ -287,6 +458,7 @@ func (m *Model) savePartial() {
 func (m *Model) selectSection(i int) {
 	n := len(m.journal.Sections) + 1
 	m.selected = (i%n + n) % n
+	m.item = -1
 	m.refresh()
 	m.viewport.GotoTop()
 }
@@ -322,6 +494,9 @@ func (m *Model) layout() layout {
 func (m *Model) contentSize() (int, int) {
 	switch m.layout() {
 	case layoutFull:
+		if m.reader {
+			return m.width, m.height - 5
+		}
 		return m.width - sidebarWidth - 2, m.height - 5
 	case layoutCompact:
 		return m.width, m.height - 2
@@ -333,39 +508,287 @@ func (m *Model) refresh() {
 	if !m.ready || m.journal == nil {
 		return
 	}
+	m.headings = nil
+	if m.selected == 0 && m.hasHighlights() {
+		m.cursor = min(max(0, m.cursor), len(m.journal.Overview.Highlights)-1)
+		m.content, m.hlLines = m.overviewList(m.viewport.Width)
+		m.viewport.SetContent(m.content)
+		m.showCursor()
+		return
+	}
+	md, heads := m.markdown()
+	m.hlLines = nil
+	lines := make([]int, len(heads))
+	for i, h := range heads {
+		lines[i] = h.line
+	}
+	var starts []int
+	m.content, starts = renderItems(md, m.viewport.Width, m.theme, lines)
+	if len(starts) == len(heads) {
+		for i := range heads {
+			heads[i].line = starts[i]
+		}
+		m.headings = heads
+	}
+	m.viewport.SetContent(m.content)
+}
+
+// heading is the start of an item of a topic's digest, or of another
+// heading or bold-led line in it.
+type heading struct {
+	line     int    // in the Markdown shown, then in content
+	item     int    // its index in Items, or -1
+	headline string // for another heading
+}
+
+// itemLine is the first line of the kth item in content, or -1.
+func (m *Model) itemLine(k int) int {
+	for _, h := range m.headings {
+		if h.item == k && k >= 0 {
+			return h.line
+		}
+	}
+	return -1
+}
+
+// markdown is what the summary pane shows of the selected section, and
+// the lines of it that start a topic's items and other headings.
+func (m *Model) markdown() (string, []heading) {
 	s := m.current()
-	var md string
+	var md, head string
 	switch {
 	case s.Status == brief.StatusPending:
 		md = "_Waiting to start…_"
 	case s.Status == brief.StatusRunning && s.Markdown == "":
 		md = "_Searching the web and summarizing…_"
-	case s.Status == brief.StatusRunning:
-		md = "## " + s.Topic + "\n\n_Looking for more…_\n\n" + s.Render()
 	case m.selected == 0 && s.Status == brief.StatusDone:
 		md = s.Render()
+	case s.Status == brief.StatusRunning:
+		head = "## " + s.Topic + "\n\n_Looking for more…_\n\n"
 	default:
-		md = "## " + s.Topic + "\n\n" + s.Render()
+		head = "## " + s.Topic + "\n\n"
 	}
-	md = markUpdates(md)
-	warnings := m.journal.BudgetWarnings
+	var heads []heading
+	if md == "" {
+		md = head + s.Render()
+		off, items := strings.Count(head, "\n"), s.ItemLines()
+		for i, l := range strings.Split(s.Markdown, "\n") {
+			t := strings.TrimSpace(l)
+			switch k := slices.Index(items, i); {
+			case k >= 0:
+				heads = append(heads, heading{line: off + i, item: k})
+			case (strings.HasPrefix(t, "#") || strings.HasPrefix(t, "**")) && !brief.IsRelated(t):
+				heads = append(heads, heading{line: off + i, item: -1, headline: brief.Headline(t)})
+			}
+		}
+	}
+	if m.selected == 0 {
+		if w := m.warnings(); len(w) > 0 {
+			var b strings.Builder
+			for _, msg := range w {
+				b.WriteString("> **Warning:** " + msg + "\n>\n")
+			}
+			md = strings.TrimSuffix(b.String(), ">\n") + "\n" + md
+		}
+	}
+	return md, heads
+}
+
+// warnings are the run's overshoot and budget warnings, shown atop the
+// Overview.
+func (m *Model) warnings() []string {
+	w := m.journal.BudgetWarnings
 	if note := m.journal.OvershootNote(); note != "" {
-		warnings = append([]string{note}, warnings...)
+		w = append([]string{note}, w...)
 	}
-	if m.selected == 0 && len(warnings) > 0 {
-		var w strings.Builder
-		for _, msg := range warnings {
-			w.WriteString("> **Warning:** " + msg + "\n>\n")
+	return w
+}
+
+// hasHighlights reports whether the Overview is shown as its list of
+// highlights rather than as Markdown.
+func (m *Model) hasHighlights() bool {
+	ov := &m.journal.Overview
+	return ov.Status == brief.StatusDone && len(ov.Highlights) > 0
+}
+
+// onHighlights reports whether the summary pane shows the highlights.
+func (m *Model) onHighlights() bool {
+	return m.selected == 0 && m.hasHighlights() && !m.showHelp
+}
+
+// highlights are the Overview's highlights in display order: "act" first.
+func (m *Model) highlights() []brief.Highlight {
+	hl := slices.Clone(m.journal.Overview.Highlights)
+	slices.SortStableFunc(hl, func(a, b brief.Highlight) int {
+		switch {
+		case a.Tier == b.Tier:
+			return 0
+		case a.Tier == brief.TierAct:
+			return -1
+		case b.Tier == brief.TierAct:
+			return 1
 		}
-		md = strings.TrimSuffix(w.String(), ">\n") + "\n" + md
-	}
-	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(m.glamStyle), glamour.WithWordWrap(m.viewport.Width-2))
-	if err == nil {
-		if out, err := r.Render(md); err == nil {
-			md = out
+		return 0
+	})
+	return hl
+}
+
+// overviewList renders the Overview's highlights in width cells, under
+// "Act now" and "Worth knowing", between the warnings and numbers and the
+// status of each topic, all computed from the journal as it is now. It
+// returns the lines and where each highlight starts.
+func (m *Model) overviewList(width int) (string, []int) {
+	w := max(1, width-2*docMargin)
+	pad := strings.Repeat(" ", docMargin)
+	var lines []string
+	add := func(style lipgloss.Style, indent, text string) {
+		text = brief.StripControl(text)
+		for _, l := range strings.Split(ansi.Wrap(text, max(1, w-lipgloss.Width(indent)), ""), "\n") {
+			lines = append(lines, pad+indent+style.Render(l))
 		}
 	}
-	m.viewport.SetContent(md)
+	lines = append(lines, "")
+	for _, msg := range m.warnings() {
+		add(warnStyle, "│ ", "Warning: "+msg)
+		lines = append(lines, "")
+	}
+	add(titleStyle, "", "Today's highlights")
+	add(mutedStyle, "", brief.NumbersLine(m.journal.Sections, m.journal.ReadMinutes()))
+	hl := m.highlights()
+	starts := make([]int, len(hl))
+	tier := ""
+	for i, h := range hl {
+		if h.Tier != tier {
+			tier = h.Tier
+			lines = append(lines, "")
+			if tier == brief.TierAct {
+				add(actStyle, "", "Act now")
+			} else {
+				add(titleStyle, "", "Worth knowing")
+			}
+		}
+		lines = append(lines, "")
+		starts[i] = len(lines)
+		marker, text := "  ", lipgloss.NewStyle()
+		if i == m.cursor {
+			marker, text = "▸ ", lipgloss.NewStyle().Bold(true)
+		}
+		first := len(lines)
+		add(text, "  ", brief.CleanText(h.Text))
+		lines[first] = pad + selStyle.Render(marker) + strings.TrimPrefix(lines[first], pad+"  ")
+		if why := brief.CleanText(h.Why); why != "" {
+			add(mutedStyle, "  ", why)
+		}
+		add(lipgloss.NewStyle().Foreground(accent), "  ", h.Topic)
+	}
+	lines = append(lines, "")
+	for _, l := range brief.StatusLines(m.journal.Sections) {
+		add(mutedStyle, "", l)
+	}
+	if ov := m.journal.Overview; ov.Stale {
+		lines = append(lines, "")
+		add(mutedStyle, "│ ", "Written before some topics were refreshed; it may be out of date.")
+	}
+	return termSafe(strings.Join(lines, "\n")), starts
+}
+
+// moveCursor moves the highlight cursor by d, keeping it in view.
+func (m *Model) moveCursor(d int) {
+	m.cursor = min(max(0, m.cursor+d), len(m.journal.Overview.Highlights)-1)
+	m.refresh()
+	m.showCursor()
+}
+
+// showCursor scrolls the Overview so the selected highlight shows, or to
+// the top if that shows it.
+func (m *Model) showCursor() {
+	if m.cursor >= len(m.hlLines) {
+		return
+	}
+	start, end := m.hlLines[m.cursor], len(strings.Split(m.content, "\n"))
+	if m.cursor+1 < len(m.hlLines) {
+		end = m.hlLines[m.cursor+1] - 1
+	}
+	switch {
+	case end <= m.viewport.Height:
+		m.viewport.GotoTop()
+	case start < m.viewport.YOffset:
+		m.viewport.SetYOffset(start)
+	case end > m.viewport.YOffset+m.viewport.Height:
+		m.viewport.SetYOffset(min(start, end-m.viewport.Height))
+	}
+}
+
+// jump opens the topic of the selected highlight at its item, or at the
+// top if the item is no longer there.
+func (m *Model) jump() {
+	hl := m.highlights()
+	if m.cursor >= len(hl) {
+		return
+	}
+	h := hl[m.cursor]
+	i := slices.IndexFunc(m.journal.Sections, func(s *brief.Section) bool { return s.Topic == h.Topic })
+	if i < 0 {
+		return
+	}
+	items := m.journal.Sections[i].Items()
+	m.selectSection(i + 1)
+	if k := brief.ItemIndex(items, h.Headline); k >= 0 {
+		if line := m.itemLine(k); line >= 0 {
+			m.viewport.SetYOffset(line)
+			m.item, m.itemAt = k, m.viewport.YOffset
+		}
+		return
+	}
+	// A highlight saved before it had to name an item: another heading
+	// with its headline, never a body line.
+	var others []brief.Item
+	var lines []int
+	for _, hd := range m.headings {
+		if hd.item < 0 {
+			others, lines = append(others, brief.Item{Headline: hd.headline}), append(lines, hd.line)
+		}
+	}
+	if k := brief.ItemIndex(others, h.Headline); k >= 0 {
+		m.viewport.SetYOffset(lines[k])
+	}
+}
+
+// currentItem is the item the summary pane points at: the selected
+// highlight's on the Overview, else the one Enter jumped to while the
+// viewport has not moved, else the one whose heading is the last at or
+// above the top of the viewport (the first if none is).
+func (m *Model) currentItem() (brief.Item, bool) {
+	if m.onHighlights() {
+		h := m.highlights()[m.cursor]
+		for _, s := range m.journal.Sections {
+			if s.Topic != h.Topic {
+				continue
+			}
+			items := s.Items()
+			if k := brief.ItemIndex(items, h.Headline); k >= 0 {
+				return items[k], true
+			}
+		}
+		return brief.Item{}, false
+	}
+	if m.selected == 0 {
+		return brief.Item{}, false
+	}
+	items := m.current().Items()
+	if len(items) == 0 {
+		return brief.Item{}, false
+	}
+	if m.item >= 0 && m.item < len(items) && m.viewport.YOffset == m.itemAt {
+		return items[m.item], true
+	}
+	best := 0
+	for _, h := range m.headings {
+		if h.item >= 0 && h.item < len(items) && h.line <= m.viewport.YOffset {
+			best = h.item
+		}
+	}
+	return items[best], true
 }
 
 func (m *Model) View() string {
@@ -382,23 +805,23 @@ func (m *Model) View() string {
 		return truncate(fmt.Sprintf("terminal too small (need %d×%d)", compactMinWidth, compactMinHeight), m.width)
 	}
 	j := m.journal
-	header := titleStyle.Render("Daily Brief") + "  " + mutedStyle.Render(j.Date) +
-		"  " + mutedStyle.Render("· "+j.Provider) +
+	header := titleStyle.Render("Daily Brief") + "  " + mutedStyle.Render(brief.StripControl(j.Date)) +
+		"  " + mutedStyle.Render("· "+brief.StripControl(j.Provider)) +
 		"  " + mutedStyle.Render(fmt.Sprintf("· %s · ~%.0f min read", j.SpendSummary(), max(1, j.ReadMinutes())))
 	switch j.BudgetLevel {
 	case "", brief.LevelOK:
 	case brief.LevelCostly:
 		header += "  " + lipgloss.NewStyle().Foreground(errColor).Render("⚠ cost")
 	default:
-		header += "  " + lipgloss.NewStyle().Foreground(errColor).Render("⚠ budget "+string(j.BudgetLevel))
+		header += "  " + lipgloss.NewStyle().Foreground(errColor).Render("⚠ budget "+brief.StripControl(string(j.BudgetLevel)))
 	}
 	if over := j.Over(); over > 0 && j.TokenBudget > 0 {
 		header += "  " + lipgloss.NewStyle().Foreground(errColor).Render("⚠ over budget by "+brief.HumanTokens(over))
 	}
 	if m.generating {
-		header += "  " + m.spinner.View() + " " + statusStyle.Render(m.status)
+		header += "  " + m.spinner.View() + " " + statusStyle.Render(brief.StripControl(m.status))
 	} else if m.status != "" {
-		header += "  " + lipgloss.NewStyle().Foreground(errColor).Render(m.status)
+		header += "  " + lipgloss.NewStyle().Foreground(errColor).Render(brief.StripControl(m.status))
 	}
 
 	box, content := sidebarBox, m.viewport.View()
@@ -408,8 +831,11 @@ func (m *Model) View() string {
 	if m.showHelp {
 		content = m.keysPane()
 	}
-	titles := lipgloss.NewStyle().Width(sidebarWidth+2).Render(paneTitle("Topics", m.focus == focusTopics)) +
-		paneTitle(truncate(m.paneName(), m.viewport.Width), m.focus == focusSummary || m.showHelp)
+	title := paneTitle(truncate(m.paneName(), m.viewport.Width), m.focus == focusSummary || m.showHelp)
+	if m.reader {
+		return truncate(header, m.width) + "\n\n" + title + "\n" + content + "\n" + m.helpText()
+	}
+	titles := lipgloss.NewStyle().Width(sidebarWidth+2).Render(paneTitle("Topics", m.focus == focusTopics)) + title
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
 		box.Height(m.viewport.Height).Width(sidebarWidth).Render(m.sidebarView(m.viewport.Height)),
 		" ",
@@ -437,18 +863,37 @@ func (m *Model) paneName() string {
 	if m.showHelp {
 		return "Keys"
 	}
-	if title := m.current().Topic; m.selected != 0 || title != "" {
+	if title := brief.StripControl(m.current().Topic); m.selected != 0 || title != "" {
 		return title
 	}
 	return "Overview"
 }
 
-// helpText is the styled help line for the open pane or key list.
+// helpText is the styled help line for the open pane or key list, or a
+// flash message in its place.
 func (m *Model) helpText() string {
-	if m.showHelp {
+	switch {
+	case m.flash != "":
+		return titleStyle.Render(truncate(m.flash, m.width))
+	case m.showHelp:
 		return helpStyle.Render(overlayHelpLine(m.width))
 	}
-	return helpStyle.Render(helpLine(m.focus, m.generating, m.width))
+	return helpStyle.Render(helpLine(m.helpMode(), m.generating, m.width))
+}
+
+// helpMode is what the help line describes.
+func (m *Model) helpMode() helpMode {
+	switch {
+	case m.focus == focusTopics:
+		return modeTopics
+	case m.onHighlights():
+		return modeHighlights
+	case m.selected == 0:
+		return modeSummary
+	case m.hasHighlights():
+		return modeItemsBack
+	}
+	return modeItems
 }
 
 // paneTitle is a pane's title, in the accent colour when it has focus.
@@ -547,7 +992,7 @@ func (m *Model) sidebar() string {
 		// The row is "▸ ✓ name  ↻N 12.3k" within the box's sidebarWidth-1
 		// cells, with at least one space before the counts.
 		room := sidebarWidth - 1 - 2 - lipgloss.Width(icon) - 1 - 1 - lipgloss.Width(count)
-		name := truncate(s.Topic, room)
+		name := truncate(brief.StripControl(s.Topic), room)
 		line := "  " + icon + " " + name
 		switch {
 		case i == m.selected && m.focus == focusTopics:

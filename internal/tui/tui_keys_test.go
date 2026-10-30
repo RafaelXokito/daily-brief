@@ -3,9 +3,11 @@ package tui
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -141,6 +143,9 @@ func TestScrollKeysInBothPanes(t *testing.T) {
 
 func TestLeftRightNeverScrollSideways(t *testing.T) {
 	m := longModel(t, 100)
+	// Rendering never makes a line wider than the pane: give the viewport
+	// one that is, as it would scroll sideways.
+	m.viewport.SetContent(strings.Repeat("0123456789", 30))
 	m.viewport.SetHorizontalStep(4)
 	// The viewport alone would scroll this content sideways on →.
 	if vp, _ := m.viewport.Update(tea.KeyMsg{Type: tea.KeyRight}); vp.View() == m.viewport.View() {
@@ -265,21 +270,26 @@ func TestHelpLineFollowsFocusAndViewFits(t *testing.T) {
 			m.Update(runes("?"))
 		}
 	}
-	for _, focus := range []pane{focusSummary, focusTopics} {
-		if l := helpLine(focus, true, 200); !strings.HasSuffix(l, "? help · q quit (cancels run)") || strings.Contains(l, "regenerate") {
+	for _, mode := range []helpMode{modeSummary, modeTopics, modeHighlights, modeItems, modeItemsBack} {
+		if l := helpLine(mode, true, 200); !strings.HasSuffix(l, "? help · q quit (cancels run)") || strings.Contains(l, "regenerate") {
 			t.Errorf("help line during a run: %q", l)
 		}
 	}
-	if l := helpLine(focusTopics, false, 200); l != "↑/↓ topic · → read · space/b page · ? help · r regenerate · q quit" {
-		t.Errorf("Topics help line %q", l)
-	}
-	if l := helpLine(focusSummary, false, 200); l != "↑/↓ scroll · space/b page · ← topics · ? help · r regenerate · q quit" {
-		t.Errorf("Summary help line %q", l)
+	for mode, want := range map[helpMode]string{
+		modeTopics:     "↑/↓ topic · → read · space/b page · z reader · ? help · r regenerate · q quit",
+		modeSummary:    "↑/↓ scroll · space/b page · ← topics · z reader · ? help · r regenerate · q quit",
+		modeHighlights: "↑/↓ highlight · enter go · o open · y copy · ← topics · z reader · ? help · r regenerate · q quit",
+		modeItems:      "↑/↓ scroll · space/b page · o open · y copy · ← topics · z reader · ? help · r regenerate · q quit",
+		modeItemsBack:  "↑/↓ scroll · space/b page · ⌫ back · o open · y copy · ← topics · z reader · ? help · r regenerate · q quit",
+	} {
+		if l := helpLine(mode, false, 200); l != want {
+			t.Errorf("help line %d: %q, want %q", mode, l, want)
+		}
 	}
 }
 
-// The key table lists every binding once, no key twice, and leaves the
-// keys planned for links and the overview free.
+// The key table lists every binding once and no key twice, with o, y and
+// z for the links and reader mode, and b still paging up.
 func TestKeyTable(t *testing.T) {
 	all := keys.all()
 	if n := reflect.TypeOf(keys).NumField(); len(all) != n {
@@ -294,9 +304,9 @@ func TestKeyTable(t *testing.T) {
 			seen[k] = true
 		}
 	}
-	for _, k := range []string{"o", "y", "z"} {
-		if seen[k] {
-			t.Errorf("key %q is bound", k)
+	for k, b := range map[string]key.Binding{"o": keys.Open, "y": keys.Copy, "z": keys.Reader, "b": keys.PageUp, "backspace": keys.Back, "enter": keys.Go} {
+		if !slices.Contains(b.Keys(), k) {
+			t.Errorf("key %q is not bound to %q", k, b.Help().Desc)
 		}
 	}
 }
@@ -340,7 +350,7 @@ func TestNavigationDuringRun(t *testing.T) {
 	if m.selected != 2 || m.focus != focusTopics || m.viewport.YOffset != 0 {
 		t.Errorf("after an update in Topics: selected %d, focus %d, YOffset %d", m.selected, m.focus, m.viewport.YOffset)
 	}
-	if h := helpLine(m.focus, m.generating, 200); !strings.Contains(m.View(), "q quit (cancels run)") || !strings.Contains(h, "→ read") {
+	if h := helpLine(m.helpMode(), m.generating, 200); !strings.Contains(m.View(), "q quit (cancels run)") || !strings.Contains(h, "→ read") {
 		t.Errorf("help line during a run: %q", h)
 	}
 

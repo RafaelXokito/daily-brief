@@ -123,17 +123,6 @@ func TestPruneSourcesKeepsNoMoreThanItems(t *testing.T) {
 	}
 }
 
-func TestCapOverviewLimitsBulletsAndWords(t *testing.T) {
-	md := "## Today's highlights\n\n- one\n- two\n- three\n- four\n- five\n- six\n- seven\n\nThat's all."
-	if got := capOverview(md); got != "## Today's highlights\n\n- one\n- two\n- three\n- four\n- five" {
-		t.Errorf("bullets: %q", got)
-	}
-	long := "## Today's highlights\n\n" + strings.Repeat("- "+strings.Repeat("word ", 30)+"\n", 5)
-	if got := capOverview(long); countWords(got) > overviewWords || !strings.HasSuffix(got, "…") {
-		t.Errorf("%d words, want at most %d and a cut mark", countWords(got), overviewWords)
-	}
-}
-
 // A pass's digest is capped, Sources included, before it is shown.
 func TestPassCapsDigestAndSources(t *testing.T) {
 	cfg := testConfig("anthropic", 0, "A")

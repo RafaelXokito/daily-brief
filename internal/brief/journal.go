@@ -50,6 +50,9 @@ type Section struct {
 	Passes int `json:"passes,omitempty"`
 	// Stale marks an overview kept from before some topics were refreshed.
 	Stale bool `json:"stale,omitempty"`
+	// Highlights are the overview's entries, each an item of a topic's
+	// digest; empty for a topic, or an overview whose reply was not JSON.
+	Highlights []Highlight `json:"highlights,omitempty"`
 }
 
 // UnmarshalJSON also reads the "budget" of journals saved before it was
@@ -419,10 +422,12 @@ func clip(s string, n int) string {
 }
 
 var (
-	mdLinkRE = regexp.MustCompile(`\[([^\]]*)\]\(([^)\s]+)\)`)
+	// mdLinkRE matches [text](url) links; the URL may hold balanced
+	// parentheses, as Wikipedia's do.
+	mdLinkRE = regexp.MustCompile(`\[([^\]]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)`)
 	boldRE   = regexp.MustCompile(`^\*\*(.+?)\*\*`)
 	// trailingLinksRE matches the source links that end a line.
-	trailingLinksRE = regexp.MustCompile(`(?:\s*\[[^\]]*\]\([^)\s]+\))+\s*$`)
+	trailingLinksRE = regexp.MustCompile(`(?:\s*\[[^\]]*\]\((?:[^()\s]|\([^()\s]*\))+\))+\s*$`)
 )
 
 // Updates counts the section's items written as updates to news an
@@ -496,12 +501,17 @@ func itemLine(item string) (string, bool) {
 // markers, an "Update:" prefix or the source links that end it; links
 // within it keep their text.
 func itemHeadline(item string) string {
+	return clip(fullHeadline(item), maxHistoryHeadline)
+}
+
+// fullHeadline is itemHeadline, uncut.
+func fullHeadline(item string) string {
 	line, _ := itemLine(item)
 	if loc := trailingLinksRE.FindStringIndex(line); loc != nil && loc[0] > 0 {
 		line = line[:loc[0]]
 	}
 	line = mdLinkRE.ReplaceAllString(line, "$1")
-	return clip(strings.TrimRight(line, " :—-"), maxHistoryHeadline)
+	return strings.TrimRight(line, " :—-")
 }
 
 // itemURL is the first link in an item, else the first source whose title

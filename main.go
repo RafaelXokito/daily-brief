@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 
 	"github.com/rafaelpereira/daily-brief/internal/brief"
 	"github.com/rafaelpereira/daily-brief/internal/config"
@@ -46,7 +47,7 @@ func run() error {
 		budget     = flag.Int64("budget", 0, "token budget for this run (overrides config; 0 keeps the config's)")
 		topics     = flag.String("topics", "", "comma-separated subset of configured topics to research")
 		refresh    = flag.Bool("refresh", false, "regenerate today's journal even if one exists")
-		print      = flag.Bool("print", false, "print the journal as Markdown instead of opening the TUI")
+		print      = flag.Bool("print", false, "print the journal instead of opening the TUI: rendered on a terminal, Markdown when piped")
 		edit       = flag.Bool("edit", false, "open the config file in $EDITOR")
 		provider   = flag.String("provider", "", "connection to use for this run: claude-code, anthropic, aws or vertex (overrides config)")
 	)
@@ -113,22 +114,41 @@ func run() error {
 		}
 	}
 	if *print {
-		return printJournal(gen, journal)
+		return printJournal(gen, journal, cfg.Theme)
 	}
 
-	style := "light"
-	if lipgloss.HasDarkBackground() {
-		style = "dark"
-	}
-	_, err = tea.NewProgram(tui.New(gen, backendErr, journal, style), programOptions()...).Run()
+	theme := resolveTheme(cfg.Theme)
+	_, err = tea.NewProgram(tui.New(gen, backendErr, journal, theme), programOptions()...).Run()
 	return err
+}
+
+// resolveTheme turns the configured theme into dark or light: auto takes
+// GLAMOUR_STYLE if it names a light or dark style, else asks the terminal
+// for its background. The TUI's own colours follow it.
+func resolveTheme(theme string) string {
+	if theme != "dark" && theme != "light" {
+		switch os.Getenv("GLAMOUR_STYLE") {
+		case "light":
+			theme = "light"
+		case "dark", "dracula", "tokyo-night", "pink":
+			theme = "dark"
+		default:
+			theme = "light"
+			if lipgloss.HasDarkBackground() {
+				theme = "dark"
+			}
+		}
+	}
+	lipgloss.SetHasDarkBackground(theme == "dark")
+	return theme
 }
 
 // programOptions leaves the mouse to the terminal, so text can always be
 // selected and copied natively; in the alternate screen, terminals send
-// the wheel as arrow keys, which scroll the focused Summary pane.
+// the wheel as arrow keys, which scroll the focused Summary pane. Output
+// goes through tui.Output, which the copy key's OSC 52 shares.
 func programOptions() []tea.ProgramOption {
-	return []tea.ProgramOption{tea.WithAltScreen()}
+	return []tea.ProgramOption{tea.WithAltScreen(), tea.WithOutput(tui.Output)}
 }
 
 // parseArgs parses flags anywhere on the command line, so they may follow
@@ -144,7 +164,11 @@ func parseArgs() []string {
 	return append(args, "", "")
 }
 
-func printJournal(gen *brief.Generator, journal *brief.Journal) error {
+func printJournal(gen *brief.Generator, journal *brief.Journal, theme string) error {
+	tty, width := stdoutTerminal()
+	if tty {
+		theme = resolveTheme(theme)
+	}
 	if journal == nil {
 		journal = gen.NewJournal()
 		updates := make(chan brief.Update)
@@ -164,11 +188,34 @@ func printJournal(gen *brief.Generator, journal *brief.Journal) error {
 		if note := journal.OvershootNote(); note != "" {
 			fmt.Fprintln(os.Stderr, "Warning:", note)
 		}
-		fmt.Print(journal.Markdown())
+		fmt.Print(printOutput(journal, tty, width, theme))
 		return saveErr
 	}
-	fmt.Print(journal.Markdown())
+	fmt.Print(printOutput(journal, tty, width, theme))
 	return nil
+}
+
+// printOutput is what -print writes: on a terminal the journal rendered
+// as the TUI renders it, links as OSC 8 hyperlinks, in width cells;
+// piped, its Markdown exactly.
+func printOutput(j *brief.Journal, tty bool, width int, theme string) string {
+	if !tty {
+		return j.Markdown()
+	}
+	return tui.Render(j.Markdown(), width, theme)
+}
+
+// stdoutTerminal reports whether stdout is a terminal, and its width.
+func stdoutTerminal() (bool, int) {
+	fd := int(os.Stdout.Fd())
+	if !term.IsTerminal(fd) {
+		return false, 0
+	}
+	w, _, err := term.GetSize(fd)
+	if err != nil || w <= 0 {
+		w = 80
+	}
+	return true, w
 }
 
 // autoNote explains an auto budget for a run over some of the topics, or
