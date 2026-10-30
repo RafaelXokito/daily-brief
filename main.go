@@ -291,12 +291,12 @@ func stdoutTerminal() (bool, int) {
 // autoNote explains an auto budget for a run over some of the topics, or
 // is "".
 func autoNote(cfg config.Config, auto bool) string {
-	if !auto || len(cfg.AllTopics) <= len(cfg.Topics) {
+	if !auto || len(cfg.AllTopics) <= len(cfg.EffectiveTopics()) {
 		return ""
 	}
 	subset, full := brief.SubsetBaseline(cfg)
 	return fmt.Sprintf("token_budget is auto: this run over %d of %d topics gets %s tokens, their weighted share of the %s baseline for all of them (at least one search pass each)",
-		len(cfg.Topics), len(cfg.AllTopics), brief.HumanTokens(subset), brief.HumanTokens(full))
+		len(cfg.EffectiveTopics()), len(cfg.AllTopics), brief.HumanTokens(subset), brief.HumanTokens(full))
 }
 
 func budgetCommand(cfg config.Config, auto bool) error {
@@ -310,7 +310,7 @@ func budgetCommand(cfg config.Config, auto bool) error {
 	if a.FullBaseline > 0 {
 		fmt.Printf("Baseline:  %s tokens (recommended for %d of %d topics: their weighted share of the %s\n"+
 			"           baseline for all of them, at least one search pass each)\n",
-			brief.HumanTokens(a.Baseline), len(cfg.Topics), len(cfg.AllTopics), brief.HumanTokens(a.FullBaseline))
+			brief.HumanTokens(a.Baseline), len(cfg.EffectiveTopics()), len(cfg.AllTopics), brief.HumanTokens(a.FullBaseline))
 	} else {
 		fmt.Printf("Baseline:  %s tokens (recommended)\n", brief.HumanTokens(a.Baseline))
 	}

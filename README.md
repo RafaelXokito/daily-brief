@@ -92,6 +92,7 @@ max_read_minutes: 9      # keep the journal readable in this many minutes
 history_days: 3          # don't repeat what the last N days reported (0 = off)
 profile: "Java 21, Quarkus 3.x, Kafka; EU ETF investor"   # about you, optional
 mute: [crypto, celebrity tech gossip]                     # subjects to skip
+general: false           # true adds a "World & hot topics" section within the budget
 topics:
   - name: Java & Quarkus
     focus: OpenJDK releases and JEPs, Quarkus releases, Jakarta EE

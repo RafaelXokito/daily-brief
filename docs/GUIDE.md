@@ -60,6 +60,7 @@ effort: medium              # low | medium | high | xhigh | max
 country: PT                 # optional, ISO code to localize search results
 profile: "Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor"   # optional, about you (≤ 500 characters)
 mute: [crypto, celebrity tech gossip]                                # optional, subjects to leave out (≤ 30, ≤ 80 characters each)
+general: false              # true adds a "World & hot topics" section: the day's major world events and trending stories
 price_input_per_mtok: 4     # USD, only for cost estimates on API providers
 price_output_per_mtok: 20
 price_per_1k_searches: 10
@@ -70,6 +71,16 @@ topics:
     focus: Critical or actively exploited CVEs, supply-chain attacks, ...
     weight: 2               # gets twice the default share of the budget (weights may differ by at most 1000:1)
 ```
+
+`general: true` (off by default; also a Settings field, applied from the next
+run) adds a **World & hot topics** section after your topics: the most
+significant world events and today's trending stories across politics,
+economy, science and society, told to skip whatever your topics already cover
+(their names are listed in its prompt) and to prefer primary or reputable
+sources. It is researched, capped and budgeted exactly like one more topic of
+weight 1, with your profile and mute list, and counts toward
+`max_read_minutes`. No topic may be named "World & hot topics" (in any case).
+`-topics "World & hot topics"` researches it alone.
 
 ### Impact tags
 
@@ -182,7 +193,10 @@ the estimated reading time and cost, and any warnings.
   1.51M for 1-7 topics and about 213k per topic beyond. With
   `claude-code` it is raised, in steps of one search, until a planned run
   spends at least 85% despite the safety margin (see below): about 610-630k
-  for 1-3 topics. Weights only split the baseline; they don't grow it.
+  for 1-3 topics. Weights only split the baseline; they don't grow it. With
+  `general: true` the World & hot topics section counts as one more topic, so
+  the baseline grows by one topic's share, and the whole run, that section
+  included, stays within `token_budget`.
   `token_budget: 0` uses the baseline. For a `-topics` run it uses those
   topics' weighted share of the baseline for all configured topics, raised to
   at least one search pass each plus the overview reserve (so `-topics AI`

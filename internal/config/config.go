@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -93,8 +94,12 @@ type Config struct {
 	// research passes rank and explain items for them. Optional.
 	Profile string `yaml:"profile,omitempty"`
 	// Mute lists subjects or keywords research passes leave out. Optional.
-	Mute   []string `yaml:"mute,omitempty"`
-	Topics []Topic  `yaml:"topics"`
+	Mute []string `yaml:"mute,omitempty"`
+	// General adds a "World & hot topics" section (see EffectiveTopics):
+	// the day's most significant world events and trending stories beside
+	// the configured topics. Off by default.
+	General bool    `yaml:"general"`
+	Topics  []Topic `yaml:"topics"`
 	// AllTopics are the configured topics when FilterTopics kept only
 	// some of them; a run over the subset is merged with the rest.
 	AllTopics []Topic `yaml:"-"`
@@ -193,7 +198,10 @@ func marshal(cfg Config) ([]byte, error) {
 		"# profile: optional, about you (at most 500 characters): items that affect it rank higher and say how, e.g.\n" +
 		"#          profile: \"Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor\"\n" +
 		"# mute: optional subjects or keywords to leave out (at most 30, 80 characters each), e.g.\n" +
-		"#          mute: [crypto, celebrity tech gossip]\n"
+		"#          mute: [crypto, celebrity tech gossip]\n" +
+		"# general: true adds a \"World & hot topics\" section (the day's major world events and trending stories,\n" +
+		"#          skipping what your topics cover), researched and budgeted like a topic of weight 1 within\n" +
+		"#          token_budget; false (default) = only your topics.\n"
 	return append([]byte(header), data...), nil
 }
 
@@ -306,7 +314,7 @@ func (c Config) Validate() error {
 	if c.MaxReadMinutes < 1 || c.MaxReadMinutes > MaxReadMinutes {
 		return fmt.Errorf("config: max_read_minutes must be between 1 and %d", MaxReadMinutes)
 	}
-	if n := max(len(c.Topics), len(c.AllTopics)); ReadableItems(c.MaxReadMinutes, n) == 0 {
+	if n := max(len(c.EffectiveTopics()), len(c.AllTopics)); ReadableItems(c.MaxReadMinutes, n) == 0 {
 		return fmt.Errorf("config: max_read_minutes %d leaves no room for a single item across %d topics; raise it or remove topics", c.MaxReadMinutes, n)
 	}
 	if c.HistoryDays < 0 || c.HistoryDays > 14 {
@@ -330,8 +338,20 @@ func (c Config) Validate() error {
 	if err := c.Provider.Validate(); err != nil {
 		return err
 	}
+	// A filtered config's topics may include the World section; the
+	// configured ones are in AllTopics, with it last when general is on.
+	user, allowed := c.Topics, 0
+	if c.AllTopics != nil {
+		user = c.AllTopics
+		if c.General {
+			allowed = 1
+		}
+	}
+	if countWorld(user) > allowed {
+		return fmt.Errorf("config: the topic name %q is reserved for the general section; rename that topic", WorldTopicName)
+	}
 	lo, hi := math.Inf(1), 0.0
-	for _, t := range c.Topics {
+	for _, t := range c.EffectiveTopics() {
 		if strings.TrimSpace(t.Name) == "" {
 			return errors.New("config: every topic needs a name")
 		}
@@ -348,6 +368,9 @@ func (c Config) Validate() error {
 		lo, hi = min(lo, w), max(hi, w)
 	}
 	if hi > maxWeightRatio*lo {
+		if c.General {
+			return fmt.Errorf("config: topic weights differ by more than %d:1 (the %s section has weight 1)", maxWeightRatio, WorldTopicName)
+		}
 		return fmt.Errorf("config: topic weights differ by more than %d:1", maxWeightRatio)
 	}
 	if c.Concurrency < 1 || c.Concurrency > MaxConcurrency {
@@ -390,14 +413,60 @@ func ReadableItems(minutes, topics int) int {
 	return max(0, (minutes*ReadingWPM-OverviewAllowance(minutes)-topics*RelatedAllowance)/WordsPerItem)
 }
 
+// WorldTopicName names the section general adds; no configured topic may
+// take it (case-insensitive).
+const WorldTopicName = "World & hot topics"
+
+func isWorld(t Topic) bool { return strings.EqualFold(strings.TrimSpace(t.Name), WorldTopicName) }
+
+func countWorld(ts []Topic) int {
+	n := 0
+	for _, t := range ts {
+		if isWorld(t) {
+			n++
+		}
+	}
+	return n
+}
+
+// WorldTopic is the section general adds beside topics, told to skip
+// what they cover.
+func WorldTopic(topics []Topic) Topic {
+	names := make([]string, 0, len(topics))
+	for _, t := range topics {
+		names = append(names, t.Name)
+	}
+	return Topic{
+		Name:   WorldTopicName,
+		Weight: 1,
+		Focus: "The most significant world events and the stories trending today across politics, economy, science and society. " +
+			"Skip anything the reader's other topics already cover: " + strings.Join(names, ", ") + ". " +
+			"Prefer primary or reputable sources; no rumours.",
+	}
+}
+
+// EffectiveTopics are the topics a run researches and budgets for: the
+// configured ones, then the World section when general is on. Topics that
+// already include it, and those FilterTopics kept (chosen among the
+// effective ones), are returned as they are, so applying it again changes
+// nothing.
+func (c Config) EffectiveTopics() []Topic {
+	if !c.General || c.AllTopics != nil || slices.ContainsFunc(c.Topics, isWorld) {
+		return c.Topics
+	}
+	return append(slices.Clip(c.Topics), WorldTopic(c.Topics))
+}
+
 // FilterTopics keeps only topics whose names match one of names
-// (case-insensitive). An empty list keeps everything.
+// (case-insensitive), among the effective ones, so the World section can
+// be chosen too. An empty list keeps everything.
 func (c *Config) FilterTopics(names []string) error {
 	if len(names) == 0 {
 		return nil
 	}
+	all := c.EffectiveTopics()
 	var kept []Topic
-	for _, t := range c.Topics {
+	for _, t := range all {
 		for _, n := range names {
 			if strings.EqualFold(strings.TrimSpace(n), t.Name) {
 				kept = append(kept, t)
@@ -409,7 +478,7 @@ func (c *Config) FilterTopics(names []string) error {
 		return fmt.Errorf("no configured topic matches %v", names)
 	}
 	if c.AllTopics == nil {
-		c.AllTopics = c.Topics
+		c.AllTopics = all
 	}
 	c.Topics = kept
 	return nil

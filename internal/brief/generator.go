@@ -188,8 +188,11 @@ type Generator struct {
 	history map[string][]Reported
 }
 
-// NewGenerator resolves an auto (0) token budget to the baseline.
+// NewGenerator resolves an auto (0) token budget to the baseline. Its
+// run covers cfg's effective topics: with general on, the World section
+// too, researched, capped and budgeted as one more topic.
 func NewGenerator(cfg config.Config, backend Backend) *Generator {
+	cfg = effective(cfg)
 	ResolveBudget(&cfg)
 	return &Generator{backend: backend, cfg: cfg, caps: itemCaps(cfg), partial: len(cfg.AllTopics) > len(cfg.Topics)}
 }

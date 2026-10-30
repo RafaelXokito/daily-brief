@@ -54,6 +54,7 @@ var Hints = map[string]string{
 	"price_per_1k_searches":  "USD per 1000 web searches, only to estimate the cost of API runs",
 	"profile":                "optional, about you (at most 500 characters): items that affect it rank higher",
 	"mute":                   "optional subjects or keywords to leave out (at most 30, 80 characters each)",
+	"general":                "on: add a World & hot topics section (major world events, trending stories) within the budget",
 	"topics":                 "what to research; edit them in the file",
 }
 

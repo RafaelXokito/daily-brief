@@ -77,8 +77,8 @@ const (
 )
 
 // field is a config key the pane shows; ptr points at its value in a
-// config (a *string, *int, *int64 or *float64, or a **bool for an on/off
-// kindEnum).
+// config (a *string, *int, *int64 or *float64, or a *bool or **bool for
+// an on/off kindEnum).
 type field struct {
 	key   string
 	kind  fieldKind
@@ -124,6 +124,7 @@ var fields = []field{
 	{key: "city", kind: kindText, limit: 100, ptr: func(c *config.Config) any { return &c.City }},
 	{key: "profile", kind: kindProfile},
 	{key: "mute", kind: kindMute},
+	{key: "general", kind: kindEnum, opts: []string{"off", "on"}, ptr: func(c *config.Config) any { return &c.General }},
 	{key: "price_input_per_mtok", kind: kindFloat, rng: "USD, 0-1000", ptr: func(c *config.Config) any { return &c.PriceInputPerMTok }},
 	{key: "price_output_per_mtok", kind: kindFloat, rng: "USD, 0-1000", ptr: func(c *config.Config) any { return &c.PriceOutputPerMTok }},
 	{key: "price_per_1k_searches", kind: kindFloat, rng: "USD, 0-1000", ptr: func(c *config.Config) any { return &c.PricePer1KSearches }},
@@ -527,9 +528,14 @@ func (m *Model) cycle(f field, d int) tea.Cmd {
 }
 
 // enumValue is a kindEnum field's value in c: its string, or on/off for
-// a *bool, where unset is the first option.
+// a **bool, where unset is the first option, or a *bool.
 func enumValue(f field, c *config.Config) string {
 	switch v := f.ptr(c).(type) {
+	case *bool:
+		if *v {
+			return "on"
+		}
+		return "off"
 	case **bool:
 		if *v == nil || **v {
 			return f.opts[0]
@@ -545,6 +551,8 @@ func enumValue(f field, c *config.Config) string {
 // never written through, as a config's clone may share it.
 func setEnum(f field, c *config.Config, opt string) {
 	switch v := f.ptr(c).(type) {
+	case *bool:
+		*v = opt == "on"
 	case **bool:
 		*v = new(opt == f.opts[0])
 	case *string:

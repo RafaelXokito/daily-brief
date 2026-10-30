@@ -675,3 +675,48 @@ func TestEditorCommand(t *testing.T) {
 		t.Errorf("editor did not get the path: %v", err)
 	}
 }
+
+// general is an on/off field: turning it on adds the World section to the
+// live budget panel at once, and saving writes it and rebuilds for the
+// next run.
+func TestSettingsGeneralRoundTrip(t *testing.T) {
+	m, path, f := settingsModel(t, settingsConfig, 120, 40)
+	press(t, m, runes("s"))
+	before := m.set.assess
+	if before == nil || len(before.Topics) != 2 {
+		t.Fatalf("assessed %+v", before)
+	}
+	goTo(t, m, "general")
+	if v := enumValue(m.set.field(), &m.set.cfg); v != "off" {
+		t.Fatalf("general shows %q, want off", v)
+	}
+	press(t, m, keyOf(tea.KeyRight))
+	if !m.set.cfg.General || enumValue(m.set.field(), &m.set.cfg) != "on" {
+		t.Fatal("general not turned on")
+	}
+	a := m.set.assess
+	if a == nil || len(a.Topics) != 3 || a.Topics[2].Name != config.WorldTopicName || a.Baseline <= before.Baseline {
+		t.Fatalf("budget panel does not follow general: %+v", a)
+	}
+	press(t, m, keyOf(tea.KeyCtrlS))
+	if m.set.dirty() {
+		t.Error("still dirty after saving")
+	}
+	got, _, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.General || !reflect.DeepEqual(got, m.set.cfg) {
+		t.Errorf("saved %+v, edited %+v", got, m.set.cfg)
+	}
+	if file := readFile(t, path); !strings.Contains(file, "general: true") || !strings.Contains(file, "my_note: keep me") {
+		t.Errorf("saved file:\n%s", file)
+	}
+	if f.calls() != 1 || !f.cfgs[0].General {
+		t.Errorf("rebuilt %d times", f.calls())
+	}
+	press(t, m, keyOf(tea.KeyLeft), keyOf(tea.KeyCtrlS))
+	if got, _, _ := config.Load(path); got.General {
+		t.Error("general not turned off")
+	}
+}

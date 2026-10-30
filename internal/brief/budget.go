@@ -207,6 +207,7 @@ func itemCeiling(searches int64) int {
 // totalItems is how many items fit in max_read_minutes beside the overview
 // and each topic's Related label.
 func totalItems(cfg config.Config) int {
+	cfg = effective(cfg)
 	return config.ReadableItems(cfg.MaxReadMinutes, len(cfg.Topics))
 }
 
@@ -214,6 +215,14 @@ func totalItems(cfg config.Config) int {
 // minutes: overviewWords, or a third of the cap when that is less, so a
 // one-minute journal still has room for items.
 func overviewAllowance(minutes int) int { return config.OverviewAllowance(minutes) }
+
+// effective is cfg with the topics a run researches and budgets for: its
+// configured ones and, when general is on, the World section (see
+// config.EffectiveTopics). Applying it again changes nothing.
+func effective(cfg config.Config) config.Config {
+	cfg.Topics = cfg.EffectiveTopics()
+	return cfg
+}
 
 // itemCaps splits the reading-time cap into a per-topic item cap: each
 // topic gets a floor of 2 items (1 when that does not fit), and the rest is
@@ -223,6 +232,7 @@ func overviewAllowance(minutes int) int { return config.OverviewAllowance(minute
 // A run over some of the topics gets the caps of all of them, since it is
 // merged into a journal that has the others.
 func itemCaps(cfg config.Config) []int {
+	cfg = effective(cfg)
 	if len(cfg.AllTopics) > len(cfg.Topics) {
 		all := cfg
 		all.Topics, all.AllTopics = cfg.AllTopics, nil
@@ -254,6 +264,7 @@ func itemCaps(cfg config.Config) []int {
 // topicCaps maps every configured topic, not only those a run covers, to
 // its item cap.
 func topicCaps(cfg config.Config) map[string]int {
+	cfg = effective(cfg)
 	if len(cfg.AllTopics) > len(cfg.Topics) {
 		cfg.Topics, cfg.AllTopics = cfg.AllTopics, nil
 	}
@@ -303,6 +314,7 @@ func weight(t config.Topic) float64 {
 // activeWeights are the topics' weights, 0 for topics the reading cap
 // leaves no items.
 func activeWeights(cfg config.Config, caps []int) ([]float64, float64) {
+	cfg = effective(cfg)
 	ws := make([]float64, len(cfg.Topics))
 	var total float64
 	for i, t := range cfg.Topics {
@@ -314,8 +326,8 @@ func activeWeights(cfg config.Config, caps []int) ([]float64, float64) {
 	return ws, total
 }
 
-// Baseline is the recommended token budget for cfg's provider and topics.
-// Weights only split it.
+// Baseline is the recommended token budget for cfg's provider and topics,
+// the World section included when general is on. Weights only split it.
 //
 // It starts from each topic's planned searches plus writing. On the API a
 // search needs its worst case free, so it is at least one pass cost per
@@ -330,6 +342,7 @@ func activeWeights(cfg config.Config, caps []int) ([]float64, float64) {
 //
 // A run over some of the configured topics gets SubsetBaseline.
 func Baseline(cfg config.Config) int64 {
+	cfg = effective(cfg)
 	if len(cfg.AllTopics) > len(cfg.Topics) {
 		b, _ := SubsetBaseline(cfg)
 		return b
@@ -361,6 +374,7 @@ func Baseline(cfg config.Config) int64 {
 // baseline of all of them, which it also returns, raised to at least one
 // search pass, with its margin, per topic and the overview reserve.
 func SubsetBaseline(cfg config.Config) (subset, full int64) {
+	cfg = effective(cfg)
 	all := cfg
 	all.Topics, all.AllTopics = cfg.AllTopics, nil
 	full = Baseline(all)
@@ -399,6 +413,7 @@ func ResolveBudget(cfg *config.Config) bool {
 
 // split returns the overview reserve and each topic's initial share.
 func split(cfg config.Config) (int64, []int64) {
+	cfg = effective(cfg)
 	reserve := overviewReserve(cfg.TokenBudget)
 	ws, total := activeWeights(cfg, itemCaps(cfg))
 	shares := make([]int64, len(cfg.Topics))
@@ -460,6 +475,7 @@ type Assessment struct {
 // Assess estimates a run of cfg (whose budget must be resolved) and warns
 // about budgets that are too low or high. Warnings never block a run.
 func Assess(cfg config.Config) Assessment {
+	cfg = effective(cfg)
 	p, w := cfg.Provider.Type, planWindowFor(cfg)
 	reserve, shares := split(cfg)
 	pool := cfg.TokenBudget - reserve
