@@ -1,635 +1,135 @@
 # daily-brief
 
-A terminal journal of today's news on the topics you care about. Claude
-researches each topic with web search within a token budget you set, then
-writes a short digest per topic plus a "Today's highlights" overview: what
-to act on, what is worth knowing, and how each topic fared.
+A terminal journal of today's news on the topics you pick. Claude searches
+the web for each topic within a token budget you set, writes a short digest
+per topic, and adds an overview of what to act on today. It exists so you
+can catch up on what matters in under about 10 minutes.
 
-## Setup
+![demo](docs/demo.gif)
+
+30-second demo, also as [MP4](docs/demo.mp4).
+
+## Requirements
+
+- Go 1.26+
+- Claude Code installed and logged in. The default provider uses your
+  Claude subscription, so no API key is needed.
+- macOS or Linux
+
+## Install
 
 ```sh
+git clone git@github.com:RafaelXokito/daily-brief.git
+cd daily-brief
 go build -o daily-brief .
-./daily-brief auth status   # first run writes ~/.config/daily-brief/config.yaml
-./daily-brief -edit         # choose provider, topics and budget
-./daily-brief
 ```
 
-## Connecting to Claude
+Or with `go install`:
 
-Pick one with `provider.type` in the config (or just `provider: claude-code`),
-or per run with `-provider <type>`. Only `anthropic` with `auth: env` needs an
-exported API key.
-
-| `type` | Uses | Setup |
-|---|---|---|
-| `claude-code` (default) | Your Claude Code login: Pro, Max, Team or **Enterprise** subscription | Install Claude Code and log in once (`claude`) |
-| `anthropic` | Claude API (Console) account | `auth: keychain`: run `daily-brief auth set-key` (stored in the macOS Keychain). `auth: profile`: run `ant auth login` (OAuth, no key). `auth: env`: `ANTHROPIC_API_KEY` |
-| `aws` | Claude Platform on AWS (company AWS account) | AWS credentials, e.g. `aws sso login`, plus `region`, `workspace_id`, optional `profile` |
-| `vertex` | Claude on Google Cloud Vertex AI | `gcloud auth application-default login`, plus `project_id` and `region` |
-
-```yaml
-provider:
-  type: anthropic
-  auth: keychain
-# or
-provider:
-  type: aws
-  region: eu-west-1
-  workspace_id: wrkspc_...
-  profile: my-sso-profile
+```sh
+go install github.com/RafaelXokito/daily-brief@latest
 ```
 
-`daily-brief auth status` checks that the configured provider is ready.
+While the repo is private, `go install` needs `GOPRIVATE=github.com/RafaelXokito`
+and SSH access to GitHub (for example `git config --global
+url."git@github.com:".insteadOf "https://github.com/"`).
 
-Amazon Bedrock isn't supported because it has no web search tool. Vertex
-AI only has the basic web search tool, and doesn't support refusal fallbacks
-or the advisory task budget.
+## Quick start
 
-## Config
+The first run writes a default config with five topics and tells you where
+it put it.
+
+```sh
+daily-brief -edit     # open the config in $EDITOR (or press s in the TUI)
+daily-brief budget    # see the recommended budget, plan, read time and cost
+daily-brief           # open today's journal; generated on first open, then cached
+```
+
+Useful flags:
+
+| Flag | What it does |
+| --- | --- |
+| `-refresh` | Regenerate today's journal |
+| `-topics "AI,Security"` | Research only these topics and merge them into today's journal |
+| `-print` | Print the journal. Rendered on a terminal, Markdown when piped |
+| `-provider anthropic` | Use another provider for this run |
+| `-budget 1000000` | Token budget for this run only |
+
+Flags work before or after a subcommand, so `daily-brief budget -topics AI`
+works too. `daily-brief -h` lists everything.
+
+## Keys
+
+| Key | Action |
+| --- | --- |
+| `↑` `k` / `↓` `j` | Previous / next topic, highlight or line |
+| `←` `h` / `→` `l` | Focus Topics / Summary |
+| `tab` | Switch pane |
+| `enter` | Read the topic, or go to the selected highlight |
+| `space` / `b` | Page down / up |
+| `o` | Open the item's source in the browser |
+| `y` | Copy the item and its link |
+| `z` | Reader mode (hide Topics) |
+| `s` `,` | Settings |
+| `r` | Regenerate |
+| `?` | All keys |
+| `q` | Quit (saves topics already done) |
+
+## Configuration
+
+The config lives at `~/.config/daily-brief/config.yaml` (or under
+`$XDG_CONFIG_HOME`). A short example:
 
 ```yaml
-token_budget: 0             # tokens per journal: a target and a cap kept by a safety margin; 0 = auto (recommended baseline)
-max_searches_per_topic: 0   # optional cap per research pass; 0 = derived from the budget
-max_read_minutes: 9         # the journal stays short enough to read in this many minutes
-theme: auto                 # auto | dark | light: the TUI's and -print's colours
-history_days: 3             # earlier days' journals not to repeat (0-14); 0 = off
-concurrency: 3              # topics researched in parallel
-model: claude-opus-5-5
-effort: medium              # low | medium | high | xhigh | max
-country: PT                 # optional, ISO code to localize search results
-profile: "Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor"   # optional, about you (≤ 500 characters)
-mute: [crypto, celebrity tech gossip]                                # optional, subjects to leave out (≤ 30, ≤ 80 characters each)
-price_input_per_mtok: 4     # USD, only for cost estimates on API providers
-price_output_per_mtok: 20
-price_per_1k_searches: 10
+token_budget: 0          # 0 = auto, the recommended baseline
+max_read_minutes: 9      # keep the journal readable in this many minutes
+history_days: 3          # don't repeat what the last N days reported (0 = off)
+profile: "Java 21, Quarkus 3.x, Kafka; EU ETF investor"   # about you, optional
+mute: [crypto, celebrity tech gossip]                     # subjects to skip
 topics:
   - name: Java & Quarkus
-    focus: OpenJDK releases and JEPs, Quarkus releases, ...
+    focus: OpenJDK releases and JEPs, Quarkus releases, Jakarta EE
   - name: Security
-    focus: Critical or actively exploited CVEs, supply-chain attacks, ...
-    weight: 2               # gets twice the default share of the budget (weights may differ by at most 1000:1)
+    focus: Critical or actively exploited CVEs, supply-chain attacks
+    weight: 2            # twice the default share of the budget
 ```
 
-### Impact tags
+Every item gets one tag: `ACT` (do something today), `WATCH` (likely to
+matter soon) or `FYI` (worth knowing), and items are ranked in that order.
 
-Every item carries one impact tag, written as a code span at the start of
-its first line after the headline:
+## Providers
 
-```markdown
-### Widget server flaw exploited in the wild
-`ACT` CVE-2026-1234 · CVSS 9.8 · KEV due Nov 10 · fixed in 3.2.1
-Unauthenticated attackers run code on exposed servers; upgrade now. [source](https://…)
-```
+Set `provider.type` in the config, or pass `-provider` for one run.
 
-- `ACT` (act today): do something now: patch, upgrade, rotate credentials,
-  a deadline.
-- `WATCH`: likely to matter soon.
-- `FYI`: worth knowing.
+| Type | Uses | Setup |
+| --- | --- | --- |
+| `claude-code` (default) | Your Claude Code login | Install Claude Code and log in once |
+| `anthropic` | Claude API | Key in the macOS Keychain (`daily-brief auth set-key`), an `ant` profile, or `ANTHROPIC_API_KEY` |
+| `aws` | Claude Platform on AWS | AWS credentials plus `region` and `workspace_id` |
+| `vertex` | Claude on Vertex AI | `gcloud` credentials plus `project_id` and `region`. Basic web search only |
 
-Security items put terse facts after the tag when known (CVE ids, CVSS
-score, whether it is in CISA KEV and its due date, affected and fixed
-versions), finance items the key figure or ticker. Tag, facts and sentences
-all count within the item's ~45 words. The code span was chosen because it is
-one word to the word cap, survives trimming and history extraction, and still
-reads well as plain Markdown. A tag is recognised in that one form only: an
-uppercase code span, `` `ACT` ``, `` `WATCH` `` or `` `FYI` ``, followed by a
-space or the end of the line, at the start of the headline line (after the
-heading or list marker, before or after an `Update:` prefix) or at the start
-of the item's first non-blank body line. Nothing else is a tag: not
-`` `act` `` (the nektos/act tool, React's `act`), `**Action:**`, `[INFO]`,
-`FYI, the …`, a tag on a later line or one inside a code block. Only the
-first tag counts; a second stays as text. An item without a tag, as in
-journals written before tags existed, counts as FYI.
+Amazon Bedrock isn't supported because it has no web search tool.
+`daily-brief auth status` checks that the configured provider is ready.
 
-Items are ranked ACT, then WATCH, then FYI, keeping the model's order within
-a tag; if a pass gets the order wrong, it is fixed in code before the digest
-is cut to its cap, so FYI items are the first to go. Items after a Related
-label stay after it, ranked among themselves. Ranking moves fenced code
-blocks whole with their item (a `### ` line inside one never starts an
-item), and leaves a digest as it is if a code block is left open at its end
-or an item's headline is not recognised. A headline never includes its
-tag, so history and highlight matching ignore it. On the overview, a
-highlight of a tagged item is `act` exactly when the item is tagged `ACT`
-(a highlight of an untagged item keeps the model's tier), and the numbers
-line counts the items to act on (`12 items · 3 to act · …`; left out when no
-item is tagged). The TUI shows tags as coloured badges (ACT red, WATCH amber,
-FYI muted) on exactly the lines where a tag is recognised, a facts line
-muted on a line of its own, and the sidebar a count
-of a topic's ACT items beside its updates (`!2 ↻1`). `y` copies an item with
-its tag as `[ACT]`. `-print` piped stays the journal's Markdown exactly.
+## Cost
 
-### Profile and mute list
+On `claude-code` a run uses your subscription quota, not dollars. The API
+providers bill tokens plus a fee per web search.
 
-`profile` (free text, at most 500 characters) tells research passes who the
-journal is for: items that affect your stack or holdings rank higher, may be
-`ACT`, and say how they affect you ("affects your Quarkus 3.x apps"). The
-overview gets it too, so its highlights' "why" is personal. `mute` (at most 30
-entries of 80 characters) lists subjects or keywords to leave out; passes are
-told not to include items mainly about them, and the overview not to pick
-highlights mainly about them. Both are given in the prompt as
-blocks, cleaned like history lines (one line each, control and invisible
-characters removed, though the joiners emoji and some scripts need stay,
-`< >` replaced by `‹ ›`):
+The budget is a cap, not a target to beat: runs stop before it, and on the
+API providers an overshoot is very unlikely and ends the run if it happens.
+A run aims to spend most of it, because more
+budget buys broader and deeper research, not a longer journal. Run
+`daily-brief budget` before your first run to see the baseline, what each
+topic gets, and the estimated cost.
 
-```
-<reader_profile>
-Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor
-</reader_profile>
-Where an item affects this reader's stack or holdings, say so ... it may be tagged `ACT`.
+## Data
 
-Do not include items mainly about:
-<muted>
-- crypto
-- celebrity tech gossip
-</muted>
-```
+Journals are saved as JSON, one file per day, in
+`~/.local/share/daily-brief/journals/` (or `$XDG_DATA_HOME/daily-brief/journals/`).
+`daily-brief -print` reads a saved journal without credentials.
 
-Muting is done by the prompt alone, like deduplication: dropping items whose
-headline contains a muted word would also drop legitimate ones (muting
-"crypto" would drop "Go crypto/tls flaw"). Without a profile or mute list the
-prompts, the overview's included, are exactly as before. With them, every request of every pass carries
-the blocks (up to about 1.3k tokens by the API backend's estimate at the
-limits); the API backend's reservations count them, since they are sized by
-the prompt really sent, and `daily-brief budget` plans each first request at
-6k tokens plus the blocks' size, so the baseline grows slightly with a
-profile and is unchanged without one.
+## More
 
-### The token budget
-
-The budget is both a spending target and a cap. A run aims to spend 85-100%
-of it with `claude-code` and 80-100% on the API providers, whose safety margin
-is larger (see below). It never knowingly goes over; if it goes over anyway,
-which is very unlikely but not impossible, the run stops and says so. More
-budget buys broader and deeper research, not a longer journal.
-
-Run `daily-brief budget` to see the recommended baseline for your provider and
-topics, each topic's weighted share of the budget (shares add up to it: topics
-draw from one pool), the searches and items each first pass buys,
-the estimated reading time and cost, and any warnings.
-
-- **Baseline.** Each topic is planned for 4 searches on the API providers (3
-  with `claude-code`), plus about 10k tokens to write. That comes to roughly
-  146k tokens per topic on the API (a search typically costs about 34k: the
-  context, planned at 6k with a full history block, read twice plus ~20k of
-  results) and 145k with `claude-code`, plus
-  15k for the overview. On the API a search may only start when its worst
-  case, about 213k on a fresh pass, is free (see below), so the baseline is at
-  least that per topic. It is also at least 1.51M, so that what can be left
-  after the last search that fits stays under 20% of the budget even once a
-  run has measured one large (45k) result, which raises every later search's
-  worst case to about 288k: (288k + 15k) / 0.2. That makes the API baseline
-  1.51M for 1-7 topics and about 213k per topic beyond. With
-  `claude-code` it is raised, in steps of one search, until a planned run
-  spends at least 85% despite the safety margin (see below): about 610-630k
-  for 1-3 topics. Weights only split the baseline; they don't grow it.
-  `token_budget: 0` uses the baseline. For a `-topics` run it uses those
-  topics' weighted share of the baseline for all configured topics, raised to
-  at least one search pass each plus the overview reserve (so `-topics AI`
-  out of 5 equal topics gets about 303k on the API, not the 1.51M floor).
-  `daily-brief budget -topics …` shows both figures, and a run prints them
-  as a note on stderr.
-- **Warnings.** These never block a run. You're warned when the budget is
-  under half the baseline or can't fund one search per topic (topics will be
-  thin or skipped), above 2× or 4× the baseline (it costs more, but the journal
-  stays capped), or estimated at over $8 per run (the API baseline itself is
-  about $7.80 at the default prices). You're also warned when a
-  topic's weight is too small to fund a pass of its own, when
-  `max_read_minutes` forces topics down to one item or skips some, when
-  `max_searches_per_topic` leaves most of the budget unspendable, and when a
-  `claude-code` budget funds only one search pass beside its safety margin, so
-  85% is out of reach, or whenever a run is planned to spend under its target
-  (85%, or 80% on the API). Warnings appear on stderr before generating, in full at
-  the top of the TUI's Overview pane (the header shows `⚠ budget low/high` or
-  `⚠ cost`) and in `daily-brief budget`.
-- **Allocation.** About 5% (at most 15k tokens) is set aside for the overview.
-  Each topic's share is fixed when it starts: its weighted part of the budget
-  still free. Topics that finish under budget therefore fund later ones. On
-  the API, a pass is allocated at least what its first search needs by what
-  the run has measured so far (K and R below) and the context it really
-  sends, a top-up's prior digest included; with `claude-code`, one search
-  plus writing. A topic whose share can't pay for that is skipped at first
-  and retried, ahead of everything else, in the top-up rounds. A search pass
-  that still finds no room for its first search when it starts (another
-  pass's large result raised R meanwhile) sends nothing and spends nothing:
-  a first pass is marked skipped for budget and retried; a top-up is not
-  counted. No topic is written without a search because its budget ran
-  short; if the model itself declines to search, the digest is kept with a
-  note saying so.
-- **Depth.** On the API a pass plans as many searches as its search loop
-  (below) can afford with typical 20k results. Each search in a pass costs more
-  than the last, as the conversation grows by every search's results, so more
-  budget buys more searches per pass and more deepen/widen passes. With
-  `claude-code` a pass plans `max(1, 0.85 × share / 45k)` searches.
-  `max_searches_per_topic` caps this if set. `daily-brief budget` follows a
-  whole run with these plans, and the same reservations as the search loop,
-  to estimate searches, spend and cost; when a run will likely spend under
-  its target, it says so.
-- **Top-up rounds.** Once every topic has had its first pass, the leftover
-  budget funds rounds of "deepen or widen" passes. Each pass gets the topic's
-  digest and looks for consequential items it missed. If the topic was quiet,
-  it widens to adjacent areas: when Java is quiet, for example, it covers other
-  languages and frameworks with notable releases or problems, listed under
-  **Related**. The pass returns a revised digest, with its own sources, that
-  replaces the old one; a failed or cut-short pass keeps the old one. Skipped
-  topics go first, then high-weight topics, topics that used all their searches
-  and thin topics. Rounds continue while the leftover covers at least one
-  first search and the last round made progress (a pass that neither
-  searched nor changed the digest is not progress), up to 15 top-ups per
-  topic on the API (a fresh pass makes the next search cheap again) and 6
-  with `claude-code`.
-- **Narrow pass.** If the run would still end below 90% of the budget, the
-  last of it funds one pass per topic that tightens and
-  re-ranks the digest without searching; its prompt says not to search. Each
-  is allocated at least 8k tokens, and on the API at least what its request
-  needs to be sent (its prompt with the history and the digest, plus room to
-  write it), about 9-10k. It is the only pass that doesn't search, so a topic
-  gets at most one per run.
-- **The API search loop.** Each request offers one search (`max_uses: 1`)
-  and the prompt asks for one search per turn. Claude searches once, writes its
-  digest and ends the turn. If searches remain and the next request's worst
-  case fits, the loop sends the reply back with "~N tokens left, M searches
-  left: run one more search for a consequential item you haven't covered
-  (widen to related areas if the topic is quiet), then rewrite the full
-  digest, or reply with it unchanged". It stops when searches run out, the
-  next search doesn't fit, Claude adds nothing, or after 12 requests. The
-  digest is the last complete one written. If a later request fails or is cut
-  off, the previous digest is kept.
-- **The cap on the API providers: a large safety margin.** Every response's
-  usage, cumulative over its sampling iterations, counts against its pass as
-  soon as it arrives. A request offers a search only when what is left, of
-  the pass and of the run, covers a deliberately pessimistic worst case:
-
-  `K·(C + R) + K·O + 6k`
-
-  K = 5 is the number of sampling iterations the request is assumed to take.
-  A normal search request takes two (one issues the search, one reads the
-  results and writes), but each further search Claude attempts is refused
-  with `max_uses_exceeded` at the cost of another iteration that reads the
-  whole context again, and dynamic filtering may add steps. C is the
-  conversation: for the first request a generous estimate (2.5 characters
-  per token plus 4k for the search tool's own system prompt and scaffolding),
-  then measured from the last `message` or `fallback_message` iteration. R is
-  the largest search result, assumed 30k (the top of the usual 10-30k) until
-  a larger one is measured. O is the request's `max_tokens` (the digest at its
-  item cap plus 4k, about 5k), counted once per iteration, so the bound holds
-  whether `max_tokens` caps each iteration or the whole response. The 6k
-  covers draft text written before a refused search, the search calls and
-  error blocks. Every iteration is counted as reading the results, though the
-  first doesn't, which leaves another ~30k of margin. A fresh pass therefore
-  needs about 205-215k free to search (more with a long prior digest), though
-  a search usually costs 30-80k.
-  A pass never starts with less than its first search needs. Once a later
-  search doesn't fit, the pass keeps the digest it has (or, mid-turn,
-  finishes it with a writing-only request, which takes one iteration and
-  reserves exactly C plus its `max_tokens`).
-  The share is also passed as an advisory task budget where supported.
-
-  The run learns as it goes: if a search request takes more iterations than
-  K, or costs more than its reservation, K is raised to match for every later
-  request of the run, in every pass, and so is R when a larger result is
-  measured. Allocations follow: later passes are sized by the raised worst
-  case, so they still search rather than stall.
-
-  The cost of this margin is the end of the budget: once no further search
-  fits, up to one search's worst case is left, less what the narrow passes
-  spend. In simulation of five topics, a run spends about 87-89% of the
-  baseline with typical results, 82-85% when one or all results are 45k, but
-  only about 77-79% when every result is 60k (each search then reserves about
-  355k). `daily-brief budget` plans with typical results and can't know this
-  in advance; a larger budget recovers it (about 90% at 2× the baseline in
-  all three cases).
-
-  This makes an overshoot very unlikely, not impossible: in simulation, a
-  request at exactly one reservation stays within it with up to four refused
-  searches (six iterations), and goes over with five or more. As defence in
-  depth, the run tracks what every pass has spent: once the run as a whole
-  goes over its budget, no further request, pass or overview starts. The
-  overshoot is recorded in the journal (`overshoot`, and in the run's record
-  in `runs`), shown in the TUI header (`⚠ over budget by …`) and at the top
-  of the Overview pane, noted at the top of `-print` output, and repeated by
-  `daily-brief budget` for today's journal. These always describe the latest
-  run against its own budget; if an earlier run today went over, the spend
-  summary adds it apart, after today's total (`· 30.0k over earlier today`). The price of the margin is that runs on the API spend less of
-  their budget, typically 80-90% at the baseline, and need a larger
-  baseline than before.
-- **Enforcement on `claude-code`.** Claude Code runs the search loop itself
-  and can't be stopped mid-pass, and its CLI has no turn or token limit
-  (no `--max-turns`; only `--max-budget-usd`, which caps dollars), so the
-  budget becomes a search limit planned at 85% of the pass's share. Beside each
-  pass the run holds back a safety margin of 10% of the pass plus one search
-  (45k tokens), which is never given to the pass. This keeps the run within the
-  budget when a pass overshoots by up to about 15%. If a pass overshoots anyway,
-  no new pass starts once what's left can't cover one, and the overview is
-  skipped rather than going over. If the CLI's output can't be read, the pass's
-  whole share counts as spent. The margin means a small `claude-code` budget
-  can end well under 85%; the baseline is sized to avoid that, and you are
-  warned below it. Claude Code's searches are mostly cheap Haiku or
-  cache-read tokens, and they count against your subscription quota rather
-  than dollars.
-
-### Never overwhelming
-
-`max_read_minutes` (at 230 words per minute) is a hard cap on the total
-number of items. Each item is a headline plus at most two tight sentences,
-about 45 words. Each topic gets 2 items, then the rest of the cap is split by
-weight, up to 10 per topic. When there are too many topics for 2 each, the
-floor drops to 1. When there are more topics than items, items go by weight
-and the lightest topics are skipped. `daily-brief budget` warns in both cases.
-Every pass is told its item and word limits and must rank items by importance.
-After every pass the digest is cut to its topic's cap in code, whatever its
-format. Items are recognised by `### ` or `## ` headings, top-level bullets or
-bold-led lines, and kept whole, dropping items from the end, **Related** ones
-included, until the topic fits `cap × 45` words (a Related label gets a few
-words of allowance). A preamble gets little room. A single item, a preamble
-or a digest with no recognisable items that is too long on its own is cut at
-a sentence end and marked "…". A Related label left with nothing after it is
-removed, however it is spelled. A topic never lists more sources than it has
-items. The overview is capped in code at 6 highlights and about 180 words,
-its numbers and status lines included (see below), or a third of the cap
-when that is less (76 words at 1 minute), so at the default 9 minutes there
-is room for 41 items with 5 topics, and even 1 minute leaves room for a few.
-The config is rejected when `max_read_minutes` leaves no room for a single
-item across all topics. The estimated reading time
-appears in the TUI header.
-
-### The overview
-
-The overview prompt asks for JSON only (no forced tool use or structured
-output, so the API and `claude-code` share one prompt and one tolerant
-parser):
-
-```json
-{"highlights":[{"tier":"act","topic":"Security","headline":"<the item's headline>","text":"≤18 words","why":"≤14 words"}]}
-```
-
-`act` is for security actions and deadlines (items tagged `ACT`), `know`
-for what is worth knowing; new stories are preferred over updates unless an
-update is major. A highlight of a tagged item is then made `act` exactly when
-the item is tagged `ACT`.
-In code, the first JSON object of the reply with highlights is taken (code
-fences and prose around it are fine), and each highlight must name a
-finished topic and one of its items (the item with that very headline, else
-compared as words, either headline starting with the other); others are
-dropped. `act` goes first, at most 6 are kept, and text and why are made
-plain (links become their text; URLs, control characters and leading `#`,
-`>` and backticks are removed) and cut to their word limits and 160
-characters. They are saved in the journal as the overview's `highlights`, and its
-Markdown (for `-print` and the reading time) is built from them, each with a
-link to its item's source. Two lines are added in code at no token cost: a
-numbers line (`12 items · 3 to act · 2 updates · 5 topics · ~7 min`) and a status line
-per topic (`Java & Quarkus — 3 items, 1 update`, `AI — quiet day`); with
-many topics the status lines are left out rather than the highlights.
-Highlights are dropped from the end until the whole fits about 180 words. A
-reply in prose falls back to its first 5 bullets, made plain the same way,
-and the overview then has no highlights. A reply that looks like JSON but
-doesn't decode (cut off or mistyped) gets neither: the overview is just the
-numbers and status lines, never raw JSON.
-
-Research passes are told to strongly prefer primary sources (vendor
-advisories, release notes, official blogs, CISA/NVD, regulator or company
-announcements), then reputable outlets, over newsletter digests, directory
-sites and unofficial trackers, and to say briefly when an item rests only on
-a secondary source. This is guidance in the prompt; no domains are blocked.
-
-Web search is billed separately per search, on top of tokens. See Anthropic's
-pricing page.
-
-### Cross-day deduplication
-
-Yesterday's news shouldn't come back as new. Each research pass (first,
-top-up and narrow) is shown what the journals of the `history_days` (default
-3, at most 14) calendar days before today reported on its topic, as a
-compact block in its prompt:
-
-```
-<previously_reported>
-Tue 27 Oct · Widget 2.0 released · widget.dev/blog/2-0
-Mon 26 Oct · Critical flaw in Foo server · nvd.nist.gov/vuln/detail/CVE-2026-1234
-</previously_reported>
-```
-
-It is told not to repeat these, and to include one only if there is a
-material new development since: a release or patch shipped, a decision,
-ruling or vote, new figures or scope, an official response or a reversal.
-Commentary, recaps and the same news from another outlet don't count. Such an
-item is written as `### Update: <headline>` and starts with what is new
-("Since Mon: …"); it counts toward the topic's item cap and ranks like any
-other item. The TUI shows it as `↻ Update · …`, and the sidebar shows a
-muted count of a topic's updates (`↻2`). The marker and the count recognise
-the same forms: a heading, bullet or bold line starting `Update:`, bold or
-not, with an impact tag before or after it or none (`` ### `ACT` Update: Foo ``
-is an update headed "Foo", shown with its badge first). The overview prefers new stories
-over updates unless an update is major. A big story therefore only returns
-as an update; there is no separate "ongoing" list.
-
-This is done by the prompt alone: nothing is filtered or demoted in code.
-The history is built from the finished topics of those days' journals, by
-topic name (the overview is skipped, and so are today's journal and older
-ones; missing or corrupt journals are skipped silently). Each item's
-headline is its first line without heading, bullet or bold markers, an
-`Update:` prefix or the source links that end it; its link is the first link
-in the item, else a source whose title contains the headline, or is contained
-in it, word for word, else none. Only http(s) links count; they are compared
-without scheme, `www.`, default port, fragment, `utm_*` parameters or
-trailing `/`. An item reported on several days with the same link and
-headline (or, without a link, the same headline) is listed once, at its
-latest date; stories that share a link, such as a releases page, stay apart.
-Angle brackets in headlines and links, and in a prior digest, are replaced by
-`‹ ›`, so text from the web can't close the prompt's tags. A topic lists at most 12 items, newest first, and about 1,500
-characters. A `-topics` run gets history for the topics it researches only.
-
-The block costs input tokens on every request of a pass: up to about 800 by
-the API backend's generous estimate (2.5 characters a token), some 550 in
-practice, and nothing when there is no history (the prompt is then exactly
-as before). The API backend's reservations count it, since they are sized by
-the prompt really sent, and `daily-brief budget` plans each first request at
-6k tokens, which covers a full block, without reading any journals.
-`history_days: 0` turns it off.
-
-## Usage
-
-| Command | |
-|---|---|
-| `daily-brief` | Open today's journal (generated on first open, then cached) |
-| `daily-brief -refresh` | Regenerate today's journal |
-| `daily-brief budget` | Show the baseline, per-topic plan, read time, cost and warnings (respects `-budget`, `-topics`, `-provider`) |
-| `daily-brief -budget 150000` | One-off budget override |
-| `daily-brief -topics "AI,Security"` | Research only some topics and merge them into today's journal |
-| `daily-brief -provider anthropic` | Use a different connection for this run |
-| `daily-brief auth set-key` / `delete-key` / `status` | Manage the Keychain API key, check credentials |
-| `daily-brief -print` | Print the journal: rendered as in the TUI on a terminal, Markdown exactly as saved when piped (good for scripts / cron) |
-
-Flags can go before or after a subcommand: `daily-brief budget -budget 1000000`
-and `daily-brief auth status -provider aws` both work.
-
-Keys: the TUI has two panes, Topics and Summary, and starts with Summary
-focused. The focused pane's title is in the accent colour. The TUI never
-captures the mouse, so you can always select and copy text with it; in the
-alternate screen, terminals such as Ghostty, WezTerm and Kitty send the wheel
-as `↑/↓`, which scroll the Summary.
-
-| Key | Action |
-| --- | --- |
-| `←` `h` | focus Topics |
-| `→` `l` | focus Summary |
-| `enter` | Topics: focus Summary. Overview: go to the selected highlight |
-| `⌫` (backspace) | back to the Overview, with the same highlight selected |
-| `tab` `shift+tab` | switch pane |
-| `↑` `k` / `↓` `j` | Topics: previous / next topic (wraps; doesn't leave Topics). Overview: previous / next highlight. Summary: scroll a line |
-| `space` `pgdown` `f` `shift+↓` | page down |
-| `b` `pgup` `shift+↑` | page up |
-| `d` `ctrl+d` / `u` `ctrl+u` | half page down / up |
-| `g` `home` / `G` `end` | top / bottom |
-| `1`–`9` | jump to the section at that position (`1` = Overview) |
-| `o` | open the source of the selected highlight's item, the item `enter` went to, or the item at the top of the Summary, in the browser (`open`, or `xdg-open`); only http(s) links are opened, others show "No web link" |
-| `y` | copy that item as plain text, with its link: `pbcopy` on a Mac outside SSH, else OSC 52 (up to about 75 KB); the help line shows "Copied" only once it was sent |
-| `z` | reader mode: hide Topics and use the full width (`z` again, or `←`/`tab`/`esc`, brings Topics back) |
-| `s` `,` | open the Settings pane (see [Settings](#settings)) |
-| `?` | show or close the list of keys |
-| `esc` | close the list of keys, or focus Topics |
-| `r` | regenerate |
-| `q` `ctrl+c` | quit |
-
-On the Overview with the Summary focused, `↑/↓` move a cursor over the
-highlights (grouped under "Act now" and "Worth knowing", each with its text,
-a muted why and its topic) and `enter` opens that topic scrolled to the
-item's heading, found by its exact headline among the item headings, or at
-the top if the item is no longer there. Paging still
-scrolls. `b` stays page up; `⌫` goes back.
-
-The scrolling keys work in either pane, and every key except `r` works while a
-journal is being generated (`r` waits for the run to finish). Quitting mid-run
-saves the topics already done.
-
-The list of keys opens over the Summary pane. If it doesn't fit, `↑/↓`,
-`pgup/pgdn`, `space`, `b`, `g` and `G` scroll it, and a "↓ more" or "↑ more"
-hint shows when keys are hidden; `?` or `esc` closes it, and other keys are
-ignored while it is open. In a terminal smaller than 50×10 the Topics pane is
-hidden and the header names the topic shown; below 20×4 the TUI only says the
-terminal is too small. With more topics than fit, the Topics pane scrolls to
-keep the selected one in view.
-
-### Settings
-
-`s` (or `,`) opens a Settings pane in place of the Summary; Topics stays.
-It edits the config file as it is on disk, never this session's `-provider`,
-`-budget` or `-topics` overrides, which it names at the top ("this session
-overrides: provider=aws") and which keep applying to this session's runs.
-
-| Key | Action |
-| --- | --- |
-| `↑` `k` / `↓` `j` | select a setting |
-| `enter` `→` | edit it; for a choice (provider, auth, effort, theme), the next value |
-| `←` / `space` | previous / next value of a choice |
-| `enter` / `esc` | take / drop an edit |
-| `a` `x` `enter` | on the mute list: add, delete, edit an entry |
-| `ctrl+s` | save |
-| `e` | open the file in `$EDITOR` (for topics, too), then read it again |
-| `R` | read the file again after it changed on disk |
-| `esc` | close; with unsaved changes it asks "Discard changes? y/n" first |
-
-Numbers take digits only and show their range; `token_budget` 0 shows as
-`auto → 575.0k`, the baseline it stands for. The profile shows a live
-`n/500` count, the mute list `n/30`. After each edit the config is checked
-as at start: an error shows at the bottom and blocks saving. Below the
-settings, the budget estimate (`daily-brief budget` in a line, with its
-warnings) follows every edit. The pane never shows a credential: for
-`auth: env` it says only whether `ANTHROPIC_API_KEY` is set.
-
-Saving rewrites only the values that changed, keeping the file's comments,
-key order and keys daily-brief doesn't know, and writes atomically (a
-temporary file renamed over it, with the same mode). If the file changed on
-disk since the pane read it, saving refuses and `R` reloads it. A file of
-several YAML documents, a change to a value shared through a YAML anchor and
-a read-only file are refused too; `e` edits them. Line endings, a byte order
-mark and emoji are kept. A theme change
-shows at once; everything else applies to the next `r`. A run in progress
-keeps its settings, and nothing starts by itself. If the new settings can't
-connect (say, no API key), the file is still saved and the next run keeps
-the previous connection.
-
-### Rendering
-
-Topics are rendered as Markdown with glamour, in a style derived from its
-dark or light style: headings without `#` marks (topic names in the accent
-colour, item headlines bold with space above), a margin of one cell, updates
-as `↻ Update · …`, a Related label as a rule and a small "Related" heading,
-impact tags as coloured badges with a muted facts line, and each source as its
-title and domain. Digests come from web pages
-through the model, so they are treated as hostile. Control characters (C0
-but newline and tab, DEL and C1), which a terminal could act on, and the
-invisible characters that reorder or hide text (bidi controls such as
-U+202E, zero-width spaces, word joiners; the zero-width joiner emoji need
-is kept) are removed where the model's output enters the journal, so saved
-and piped journals are clean, and again before rendering. So are HTML
-character references that would decode into one, such as `&#27;` or
-`&#x202E;`, which Markdown decodes after that. As a last guard, the
-rendered output, the Overview's list and `-print` on a terminal keep only
-colour (SGR) sequences and the app's own OSC 8 hyperlinks; any other escape
-sequence, BEL, backspace, carriage return, DEL and C1 is dropped. Only
-http(s) links with a host become OSC 8 hyperlinks (WezTerm, Kitty: hover
-underlines, click opens. Ghostty: hold Cmd to highlight, Cmd-click to
-open), without any `user@` part, so
-`https://good.com@evil.com` links to and shows evil.com; a host with control
-or invisible characters is not linked. An inline `[source](…)` link or a
-bare URL shows as `↗ domain` (without `www.`), or `↗ link`, any other link
-as its text. A domain with non-ASCII characters shows as punycode, so a
-lookalike such as `аpple.com` (Cyrillic `а`) shows as `↗ xn--pple-43d.com`,
-in the Sources list too. A link with
-another scheme (`javascript:`, `file:`, …) shows only its text, unlinked. No
-raw URL is shown, and URLs with balanced parentheses, as Wikipedia's, link
-in full. Each link is replaced by a placeholder of its text's width, made of
-private-use characters removed from the Markdown beforehand, before glamour
-wraps the text and restored after, so a link never breaks across lines; one
-too long for a line is hard-wrapped with its hyperlink closed and reopened
-on each line. A title's words, and the spaces between them, are one
-hyperlink on each line it spans, opened and closed once there with the
-same id and URI on every line, so the terminal highlights the whole title
-on hover rather than one word. Notes and warnings keep their `│` bar on
-every line
-they wrap to, and no line is wider than the pane. This is display only: the
-saved Markdown is unchanged. The Overview with highlights is drawn by the
-TUI itself, so each highlight is a known set of lines.
-
-`theme: auto` uses `GLAMOUR_STYLE` if it is `light`, or `dark` (or another
-dark glamour style), and otherwise asks the terminal for its background
-before the TUI starts; `dark` and `light` force one. The TUI's own colours
-follow it. `-print` on a terminal renders the same way at the terminal's
-width; piped, it writes the journal's Markdown byte for byte.
-
-Journals are saved as JSON in `~/.local/share/daily-brief/journals/`. A journal
-in which no topic was summarized isn't saved, and a saved one like that is
-treated as missing. Saving never loses what was written earlier today: the
-file is written to a temporary file and renamed into place, and a saved
-journal that can't be parsed is moved aside to `<date>.json.bak` (or
-`.bak.2`, …, never over an earlier backup) before a new one is saved, with a
-note on stderr. Until then, opening today's journal reports the parse error;
-`-refresh` regenerates it. When
-you regenerate, a topic that fails this time keeps its earlier digest, with a
-note, and that digest's own tokens, searches and passes. A `-topics` run replaces only the topics it researched and keeps the
-others, in the TUI and with `-print`. Its overview is rewritten from the
-merged topics if the run's budget covers that; otherwise the earlier overview
-stays, marked as possibly out of date (as it does when a full run's overview
-fails). A `-topics` run keeps each topic's reading cap from the full config, so
-the merged journal stays within `max_read_minutes`. Like a full run, it
-records its own overshoot; earlier runs' stays in their records in `runs`.
-`-print` shows a saved
-journal without needing credentials.
-
-**What a journal records about spending.** Each section's `tokens_used`,
-`searches` and `passes` belong to the digest it shows: a digest kept from an
-earlier run keeps that run's figures. `allocated` is the sum of what the
-topic's passes were allocated (first pass plus top-ups and narrow pass), so
-it can be larger than the topic's share; journals saved before it was
-renamed call it `budget`, which is still read. `token_budget` is the budget of
-the latest run, never a sum of budgets. `runs` lists every run saved into the
-day's journal with its `budget`, what it `used` in all, and how much of that
-was `failed`: spent on topics, or the overview, that failed in that run, even
-when the journal shows an earlier digest in their place. A run in which every
-call failed therefore leaves the earlier digests and their figures as they
-were and adds a run record whose spend is all failed. The TUI header and
-`-print` show the latest run against its own budget, what it spent on failed
-topics, and what all of today's runs spent, e.g. `190.9k / 200.0k tokens
-(95%), 190.9k on failed topics · 645.9k today in 2 runs`, followed by
-`· 30.0k over earlier today` if an earlier run went over its budget. A journal saved
-before `runs` existed counts as one run.
+[docs/GUIDE.md](docs/GUIDE.md) covers budgeting, the safety margin, the
+overview, deduplication across days, settings and rendering in detail.
