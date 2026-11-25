@@ -16,7 +16,9 @@ const (
 	inputPerItem      = 3300 // upper bound on one item's prompt tokens, for Reserve
 )
 
-// Budget limits what the editor may spend. Provider is informational.
+// Budget limits what the editor may spend. Provider is carried for callers
+// and not used here: margin sizing per provider is the caller's choice, made
+// when it fills MarginPct.
 type Budget struct {
 	Tokens    int64
 	MarginPct int
@@ -60,6 +62,7 @@ type pool struct {
 	mu        sync.Mutex
 	remaining int64
 	spent     int64
+	held      int64 // reserved for the front page, outside remaining
 	marginPct int
 }
 
@@ -74,6 +77,24 @@ func (p *pool) claim(planned int64) (claimed int64, ok bool) {
 	}
 	p.remaining -= claimed
 	return claimed, true
+}
+
+// reserve sets aside n for a later pass if it fits now.
+func (p *pool) reserve(n int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if n <= p.remaining {
+		p.remaining -= n
+		p.held = n
+	}
+}
+
+// release returns the reservation to the pool.
+func (p *pool) release() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.remaining += p.held
+	p.held = 0
 }
 
 // settle replaces a claim with what the pass reported.
@@ -149,7 +170,15 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	p := &pool{remaining: budget.Tokens, marginPct: budget.MarginPct}
+	p := &pool{remaining: budget.Tokens, marginPct: max(budget.MarginPct, 0)}
+	// The front page is the most visible page: set its estimated cost aside
+	// before the chapters can use the budget up.
+	var asFallback []Chapter
+	for _, c := range in.Chapters {
+		asFallback = append(asFallback, fallbackChapter(c))
+	}
+	fs, fi := frontPrompt(in, asFallback)
+	p.reserve(withMargin(newPlan(fs, fi, frontOutput).planned, p.marginPct))
 	chapters := make([]Chapter, len(in.Chapters))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
@@ -164,11 +193,14 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 	}
 	wg.Wait()
 
+	p.release()
 	front := FallbackFront(in)
-	system, input := frontPrompt(in, chapters)
-	if reply, ok := p.pass(ctx, b, newPlan(system, input, frontOutput)); ok {
-		if fp, err := parseFront(reply, chapters); err == nil {
-			front = fp
+	if ctx.Err() == nil {
+		system, input := frontPrompt(in, chapters)
+		if reply, ok := p.pass(ctx, b, newPlan(system, input, frontOutput)); ok {
+			if fp, err := parseFront(reply, chapters); err == nil {
+				front = fp
+			}
 		}
 	}
 

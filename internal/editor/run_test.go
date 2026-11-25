@@ -169,15 +169,25 @@ func TestRunFallsBackOnFailedFactCheck(t *testing.T) {
 	}
 }
 
+// frontMargin is the front page's reservation for in.
+func frontMargin(in Input) int64 {
+	var fb []Chapter
+	for _, c := range in.Chapters {
+		fb = append(fb, fallbackChapter(c))
+	}
+	fs, fi := frontPrompt(in, fb)
+	return withMargin(newPlan(fs, fi, frontOutput).planned, 20)
+}
+
 func TestRunSkipsPassThatDoesNotFit(t *testing.T) {
 	in := runInput()
 	m1 := withMargin(chapterPlan(in.Chapters[0]).planned, 20)
 	m2 := withMargin(chapterPlan(in.Chapters[1]).planned, 20)
 	// Chapter 1 fits and spends what it claimed; one token short of chapter 2.
 	f := newFake(m1)
-	p := Run(context.Background(), f, in, Budget{Tokens: m1 + m2 - 1, MarginPct: 20}, 1)
-	if len(f.calls) != 1 || f.calls[0] != "chapter" {
-		t.Fatalf("calls = %v, want one chapter call", f.calls)
+	p := Run(context.Background(), f, in, Budget{Tokens: frontMargin(in) + m1 + m2 - 1, MarginPct: 20}, 1)
+	if len(f.calls) != 2 || f.calls[0] != "chapter" || f.calls[1] != "front" {
+		t.Fatalf("calls = %v, want one chapter call then front", f.calls)
 	}
 	if b := p.Chapters[1].Stories; len(b) != 1 || !b[0].Fallback || b[0].Placement != "lead" {
 		t.Fatalf("beta should fall back: %+v", b)
@@ -185,10 +195,7 @@ func TestRunSkipsPassThatDoesNotFit(t *testing.T) {
 	if p.Fallbacks != 1 {
 		t.Fatalf("fallbacks = %d", p.Fallbacks)
 	}
-	if p.Front.CoverLine == "" || len(p.Front.Leads) == 0 {
-		t.Fatalf("front should be the fallback front: %+v", p.Front)
-	}
-	if p.Tokens != m1 {
+	if p.Tokens != 2*m1 {
 		t.Fatalf("tokens = %d", p.Tokens)
 	}
 }
@@ -201,11 +208,11 @@ func TestRunNeverStartsPastBudget(t *testing.T) {
 	// more than it claimed, so the second no longer fits.
 	over := m1 + 101
 	f := newFake(over)
-	p := Run(context.Background(), f, in, Budget{Tokens: m1 + m2 + 100, MarginPct: 20}, 1)
-	if len(f.calls) != 1 {
-		t.Fatalf("calls = %v, want only the first chapter", f.calls)
+	p := Run(context.Background(), f, in, Budget{Tokens: frontMargin(in) + m1 + m2 + 100, MarginPct: 20}, 1)
+	if len(f.calls) != 2 || f.calls[1] != "front" {
+		t.Fatalf("calls = %v, want first chapter then front", f.calls)
 	}
-	if p.Tokens != over {
+	if p.Tokens != 2*over {
 		t.Fatalf("tokens = %d", p.Tokens)
 	}
 	if !p.Chapters[1].Stories[0].Fallback {
@@ -252,5 +259,56 @@ func TestOutputPlan(t *testing.T) {
 func TestReserve(t *testing.T) {
 	if got, want := Reserve(8, 30), int64(30*(3300+650)+9*3000); got != want {
 		t.Fatalf("Reserve = %d, want %d", got, want)
+	}
+}
+
+func TestRunReservesFrontPage(t *testing.T) {
+	in := runInput()
+	var fb []Chapter
+	for _, c := range in.Chapters {
+		fb = append(fb, fallbackChapter(c))
+	}
+	fs, fi := frontPrompt(in, fb)
+	mFront := withMargin(newPlan(fs, fi, frontOutput).planned, 20)
+	m2 := withMargin(chapterPlan(in.Chapters[1]).planned, 20)
+	f := newFake(1)
+	// Room for the front page and only the smaller chapter.
+	p := Run(context.Background(), f, in, Budget{Tokens: mFront + m2 + 20, MarginPct: 20}, 1)
+	if len(f.calls) != 2 || f.calls[0] != "chapter" || f.calls[1] != "front" {
+		t.Fatalf("calls = %v, want one chapter then front", f.calls)
+	}
+	if !p.Chapters[0].Stories[0].Fallback || p.Chapters[1].Stories[0].Fallback {
+		t.Fatalf("alpha should fall back, beta not: %+v", p.Chapters)
+	}
+	if p.Front.CoverLine != "Cover" {
+		t.Fatalf("front pass should have run: %+v", p.Front)
+	}
+}
+
+func TestRunClampsNegativeMargin(t *testing.T) {
+	in := runInput()
+	need := chapterPlan(in.Chapters[0]).planned
+	f := newFake(1)
+	Run(context.Background(), f, in, Budget{Tokens: need, MarginPct: -50}, 1)
+	if len(f.calls) == 0 {
+		t.Fatalf("negative margin must act as zero: chapter 1 should fit exactly")
+	}
+}
+
+func TestRunSkipsFrontWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := newFake(1)
+	f.chapter = func(system, input string) string {
+		cancel()
+		return goodReplies("")(system, input)
+	}
+	p := Run(ctx, f, runInput(), bigBudget(), 1)
+	for _, c := range f.calls {
+		if c == "front" {
+			t.Fatalf("front called after cancel: %v", f.calls)
+		}
+	}
+	if p.Front.CoverLine == "" || p.Front.CoverLine == "Cover" {
+		t.Fatalf("want fallback front: %+v", p.Front)
 	}
 }
