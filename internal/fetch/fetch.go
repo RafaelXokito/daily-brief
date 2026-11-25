@@ -24,7 +24,7 @@ const (
 	defaultTimeout   = 20 * time.Second
 	defaultMaxBytes  = 5 << 20
 	defaultMinWords  = 150
-	defaultMaxWords  = 2500
+	DefaultMaxWords  = 2500 // where an article is cut unless Options.MaxWords says otherwise
 	defaultWorkers   = 4
 	defaultUserAgent = "daily-brief (+https://github.com/RafaelXokito/daily-brief)"
 )
@@ -69,7 +69,7 @@ func (o Options) withDefaults() Options {
 		o.MinWords = defaultMinWords
 	}
 	if o.MaxWords <= 0 {
-		o.MaxWords = defaultMaxWords
+		o.MaxWords = DefaultMaxWords
 	}
 	if o.Concurrency <= 0 {
 		o.Concurrency = defaultWorkers

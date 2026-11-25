@@ -205,7 +205,7 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	// The editor gets what research left of the whole budget, so a research
 	// overspend comes out of the editor's share; at 0 it falls back
 	// mechanically.
-	edBudget := editor.Budget{Tokens: max(0, split.Research+split.Editor-researchSpent), MarginPct: MarginPercent, Provider: x.cfg.Provider.Type}
+	edBudget := editor.Budget{Tokens: max(0, split.Research+split.Editor-researchSpent), MarginPct: editorMargin(x.cfg.Provider.Type), Provider: x.cfg.Provider.Type}
 	x.logf("editing %d chapters", len(in.Chapters))
 	p := runEditor(x.ctx, x.d.Backend, in, edBudget, x.cfg.Concurrency)
 	if err := x.ctx.Err(); err != nil {

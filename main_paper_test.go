@@ -166,13 +166,13 @@ func TestDropboxLoginNeedsAppKey(t *testing.T) {
 
 func TestBudgetShowsPaperSplit(t *testing.T) {
 	cfg := config.Default()
-	cfg.Paper.TokenBudget = 400000
+	cfg.Paper.TokenBudget = 1_200_000
 	out := budgetOutput(t, cfg)
-	split, err := paper.SplitBudget(400000, cfg)
+	split, err := paper.SplitBudget(1_200_000, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "Paper: 400k") {
+	if !strings.Contains(out, "Paper: 1.2M") {
 		t.Fatalf("budget output lacks the paper line:\n%s", out)
 	}
 	for _, want := range []string{"research " + paper.HumanTokens(split.Research), "editor " + paper.HumanTokens(split.Editor)} {

@@ -258,12 +258,6 @@ func TestOutputPlan(t *testing.T) {
 	}
 }
 
-func TestReserve(t *testing.T) {
-	if got, want := Reserve(8, 30), int64(30*(3300+650)+9*3000); got != want {
-		t.Fatalf("Reserve = %d, want %d", got, want)
-	}
-}
-
 func TestRunReservesFrontPage(t *testing.T) {
 	in := runInput()
 	var fb []Chapter

@@ -23,15 +23,15 @@ func budgetConfig(topics int, general bool) config.Config {
 func TestSplitBudget(t *testing.T) {
 	cfg := budgetConfig(8, true)
 	items := brief.MaxItems(cfg)
-	want := editor.Reserve(9, items)
-	got, err := SplitBudget(400_000, cfg)
+	want := editor.Reserve(9, items, MarginPercent)
+	got, err := SplitBudget(1_200_000, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Editor != want || got.Research != 400_000-want {
+	if got.Editor != want || got.Research != 1_200_000-want {
 		t.Errorf("split %+v, want editor %d", got, want)
 	}
-	if got.Research < 200_000 {
+	if got.Research < 600_000 {
 		t.Errorf("research %d below half", got.Research)
 	}
 }
@@ -42,14 +42,14 @@ func TestSplitBudgetGeneralOffCountsConfiguredTopics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := editor.Reserve(8, brief.MaxItems(cfg)); got.Editor != want {
+	if want := editor.Reserve(8, brief.MaxItems(cfg), MarginPercent); got.Editor != want {
 		t.Errorf("editor %d, want %d", got.Editor, want)
 	}
 }
 
 func TestSplitBudgetTooSmall(t *testing.T) {
 	cfg := budgetConfig(8, true)
-	reserve := editor.Reserve(9, brief.MaxItems(cfg))
+	reserve := editor.Reserve(9, brief.MaxItems(cfg), MarginPercent)
 	_, err := SplitBudget(2*reserve-1, cfg)
 	if err == nil {
 		t.Fatal("expected error")
@@ -59,5 +59,18 @@ func TestSplitBudgetTooSmall(t *testing.T) {
 	}
 	if _, err := SplitBudget(2*reserve, cfg); err != nil {
 		t.Errorf("exactly twice the reserve must work: %v", err)
+	}
+}
+
+// The editor's margin, like the generator's, applies only to claude-code.
+func TestSplitBudgetMarginOnlyForClaudeCode(t *testing.T) {
+	cfg := budgetConfig(8, true)
+	cfg.Provider.Type = "anthropic"
+	got, err := SplitBudget(10_000_000, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := editor.Reserve(9, brief.MaxItems(cfg), 0); got.Editor != want {
+		t.Errorf("editor %d, want %d with no margin", got.Editor, want)
 	}
 }

@@ -2,9 +2,11 @@ package editor
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/RafaelXokito/daily-brief/internal/brief"
+	"github.com/RafaelXokito/daily-brief/internal/fetch"
 )
 
 const (
@@ -13,7 +15,11 @@ const (
 	outputWithoutBody = 200  // planned output tokens per item without one
 	outputPerPass     = 300
 	frontOutput       = 1500
-	inputPerItem      = 3300 // upper bound on one item's prompt tokens, for Reserve
+
+	// Reserve's bounds on text it cannot see before research.
+	articleBytesPerWord = 7    // a fetched article's bytes per word; English runs about 6 with the space
+	itemFieldsBytes     = 2000 // one item's headline, tag, facts, digest and host, with their labels
+	frontBytesPerItem   = 1500 // one story's headline and opening on the front page, plus a highlight
 )
 
 // Budget limits what the editor may spend. Provider is carried for callers
@@ -25,11 +31,17 @@ type Budget struct {
 	Provider  string
 }
 
-// Reserve is an upper bound on the editor's cost, known before research:
-// every item's prompt and reply, plus the overhead of one pass per chapter
-// and one for the front page.
-func Reserve(chapters, items int) int64 {
-	return int64(items)*(inputPerItem+outputWithBody) + int64(chapters+1)*passOverhead
+// Reserve is an upper bound on the editor's cost, known before research and
+// estimated as Run plans its passes: every item's prompt with an article
+// cut at fetch's default word limit and its planned reply, one chapter pass
+// per chapter, and the front page's prompt and reply, all with marginPct
+// on top as Run claims them.
+func Reserve(chapters, items, marginPct int) int64 {
+	n := int64(items)
+	item := brief.EstimateTokens(strings.Repeat("x", fetch.DefaultMaxWords*articleBytesPerWord+itemFieldsBytes)) + outputWithBody
+	chapter := brief.EstimateTokens(chapterSystem) + passOverhead + outputPerPass
+	front := brief.EstimateTokens(frontSystem+strings.Repeat("x", items*frontBytesPerItem)) + passOverhead + frontOutput
+	return withMargin(n*item+int64(chapters)*chapter+front, marginPct)
 }
 
 type plan struct {

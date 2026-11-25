@@ -732,7 +732,7 @@ The paper has its own block in `config.yaml`:
 
 ```yaml
 paper:
-  token_budget: 400000   # tokens per edition, required, must be positive
+  token_budget: 1200000  # tokens per edition, required, must be positive
   title: The Daily Brief # optional, this is the default
   dropbox:
     app_key: <your Dropbox app key>   # not a secret
@@ -804,16 +804,19 @@ While reading, open the Aa menu and choose Publisher Default for the font.
 The paper's budget covers everything the run spends: research, the overview and the editor pass.
 The editor's share is reserved before research starts, so research can never eat it.
 A pass starts only if its planned cost plus a safety margin fits in what is left.
+The editor's share is its worst case: every story with a full-length source article (cut at 2,500 words), margin included.
+Research must keep at least half of the budget, so the smallest budget that works is twice the editor's share.
+With the default five topics that is about 1.03M tokens; `daily-brief budget` shows the split for your config, and a budget that is too small is refused with the smallest one that works.
 
 The `claude-code` provider cannot stop a pass part-way: the Claude Code CLI has no token limit, and its cache reads count as full tokens in daily-brief's accounting while costing about a tenth in dollars.
 So on `claude-code` the paper keeps a wide safety margin (currently 30%, sized from test runs) to stay under the budget.
 If a run still spends more than its budget, the overshoot is never hidden.
-It appears in the summary line (`412k of 400k tokens (over by 12k)`), in the colophon, and as a warning on stderr, which lands in the systemd journal on the server.
+It appears in the summary line (`1.3M of 1.2M tokens (over by 60k)`), in the colophon, and as a warning on stderr, which lands in the systemd journal on the server.
 
 Each run ends with one summary line on stdout:
 
 ```
-paper 2026-11-25: 312k of 400k tokens, 41 stories, 28 of 39 sources summarised, 2 editor fallbacks, delivered as The Daily Brief 2026-11-25.epub
+paper 2026-11-25: 934k of 1.2M tokens, 41 stories, 28 of 39 sources summarised, 2 editor fallbacks, delivered as The Daily Brief 2026-11-25.epub
 ```
 
 With `-no-deliver` the end of the line reads `saved to <path>` instead.

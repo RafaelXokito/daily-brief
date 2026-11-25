@@ -723,3 +723,28 @@ func TestRunLogsSkippedTopics(t *testing.T) {
 		t.Errorf("log names no skipped topic:\n%s", e.log.String())
 	}
 }
+
+// The editor's margin, like the generator's, applies only to claude-code.
+func TestRunEditorMarginOnlyForClaudeCode(t *testing.T) {
+	for provider, want := range map[string]int{"claude-code": MarginPercent, "anthropic": 0} {
+		t.Run(provider, func(t *testing.T) {
+			e := newRunEnv(t)
+			e.cfg.Provider.Type = provider
+			var got []int
+			orig := runEditor
+			runEditor = func(ctx context.Context, b brief.Backend, in editor.Input, budget editor.Budget, n int) editor.Paper {
+				got = append(got, budget.MarginPct)
+				return orig(ctx, b, in, budget, n)
+			}
+			defer func() { runEditor = orig }()
+
+			if _, err := e.run(Options{NoDeliver: true}); err != nil {
+				t.Fatal(err)
+			}
+
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("editor margins %v, want [%d]", got, want)
+			}
+		})
+	}
+}
