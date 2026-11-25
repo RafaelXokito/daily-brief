@@ -20,13 +20,13 @@ import (
 )
 
 const (
-	maxRedirects     = 5
-	defaultTimeout   = 20 * time.Second
-	defaultMaxBytes  = 5 << 20
-	defaultMinWords  = 150
-	DefaultMaxWords  = 2500 // where an article is cut unless Options.MaxWords says otherwise
-	defaultWorkers   = 4
-	defaultUserAgent = "daily-brief (+https://github.com/RafaelXokito/daily-brief)"
+	maxRedirects       = 5
+	defaultTimeout     = 20 * time.Second
+	defaultMaxBytes    = 5 << 20
+	defaultMinWords    = 150
+	DefaultMaxWords    = 2500 // where an article is cut unless Options.MaxWords says otherwise
+	DefaultConcurrency = 4    // parallel fetches unless Options.Concurrency says otherwise
+	defaultUserAgent   = "daily-brief (+https://github.com/RafaelXokito/daily-brief)"
 )
 
 var (
@@ -52,9 +52,12 @@ type Options struct {
 }
 
 // Article is the outcome for one URL.
+// Image is the page's preview image (the extractor's metadata, which
+// reads og:image among others) as an absolute http(s) URL, or "".
 type Article struct {
 	Text  string
 	Words int
+	Image string
 	Err   error
 }
 
@@ -72,7 +75,7 @@ func (o Options) withDefaults() Options {
 		o.MaxWords = DefaultMaxWords
 	}
 	if o.Concurrency <= 0 {
-		o.Concurrency = defaultWorkers
+		o.Concurrency = DefaultConcurrency
 	}
 	if o.UserAgent == "" {
 		o.UserAgent = defaultUserAgent
@@ -148,54 +151,76 @@ func checkScheme(u *url.URL) error {
 }
 
 func fetchOne(ctx context.Context, client *http.Client, raw string, o Options) Article {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return Article{Err: fmt.Errorf("bad url: %w", err)}
-	}
-	if err := checkScheme(u); err != nil {
-		return Article{Err: err}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
-	if err != nil {
-		return Article{Err: err}
-	}
-	req.Header.Set("User-Agent", o.UserAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml")
-	resp, err := client.Do(req)
-	if err != nil {
-		return Article{Err: err}
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Article{Err: fmt.Errorf("http status %d", resp.StatusCode)}
-	}
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		mt, _, _ := mime.ParseMediaType(ct)
-		if mt != "text/html" && mt != "application/xhtml+xml" {
-			return Article{Err: fmt.Errorf("%w: %s", ErrNotHTML, ct)}
+	body, _, final, err := get(ctx, client, raw, o, "text/html,application/xhtml+xml", o.MaxBytes, func(mt string) error {
+		if mt != "" && mt != "text/html" && mt != "application/xhtml+xml" {
+			return fmt.Errorf("%w: %s", ErrNotHTML, mt)
 		}
-	}
-	// Read one byte past the limit so an oversized page is refused, not silently truncated.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, o.MaxBytes+1))
+		return nil
+	})
 	if err != nil {
 		return Article{Err: err}
 	}
-	if int64(len(body)) > o.MaxBytes {
-		return Article{Err: fmt.Errorf("%w: over %d bytes", ErrTooLarge, o.MaxBytes)}
-	}
-	res, err := trafilatura.Extract(bytes.NewReader(body), trafilatura.Options{OriginalURL: u, ExcludeComments: true})
+	res, err := trafilatura.Extract(bytes.NewReader(body), trafilatura.Options{OriginalURL: final, ExcludeComments: true})
 	if err != nil {
 		return Article{Err: fmt.Errorf("extract: %w", err)}
 	}
 	if res == nil {
 		return Article{Err: ErrTooShort}
 	}
+	image := imageURL(res.Metadata.Image, final)
 	text := strings.TrimSpace(res.ContentText)
 	if n := len(strings.Fields(text)); n < o.MinWords {
-		return Article{Err: fmt.Errorf("%w: %d words", ErrTooShort, n)}
+		return Article{Image: image, Err: fmt.Errorf("%w: %d words", ErrTooShort, n)}
 	}
 	text = capWords(text, o.MaxWords)
-	return Article{Text: text, Words: len(strings.Fields(text))}
+	return Article{Text: text, Words: len(strings.Fields(text)), Image: image}
+}
+
+// get fetches raw with client and returns its body, at most max bytes, its
+// media type (lower case, "" when the server sent none) and the URL it was
+// finally served from. check vets the media type before the body is read.
+func get(ctx context.Context, client *http.Client, raw string, o Options, accept string, max int64, check func(mediaType string) error) ([]byte, string, *url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("bad url: %w", err)
+	}
+	if err := checkScheme(u); err != nil {
+		return nil, "", nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	req.Header.Set("User-Agent", o.UserAgent)
+	req.Header.Set("Accept", accept)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, "", nil, fmt.Errorf("http status %d", resp.StatusCode)
+	}
+	var mt string
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		mt, _, _ = mime.ParseMediaType(ct)
+		mt = strings.ToLower(mt)
+		if mt == "" {
+			mt = "unparsable: " + ct
+		}
+	}
+	if err := check(mt); err != nil {
+		return nil, "", nil, err
+	}
+	// Read one byte past the limit so an oversized body is refused, not silently truncated.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if int64(len(body)) > max {
+		return nil, "", nil, fmt.Errorf("%w: over %d bytes", ErrTooLarge, max)
+	}
+	return body, mt, resp.Request.URL, nil
 }
 
 // capWords cuts text to at most limit words, backing up to the last sentence end.
