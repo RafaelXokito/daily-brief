@@ -1,6 +1,8 @@
 package paper
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,6 +24,8 @@ func TestDecide(t *testing.T) {
 		{"today not delivered book gone", State{Date: "2026-11-25"}, false, false, Build},
 		{"refresh", State{Date: "2026-11-25", Delivered: true}, true, true, RebuildToday},
 		{"refresh undelivered", State{Date: "2026-11-25"}, true, true, RebuildToday},
+		{"refresh book gone", State{Date: "2026-11-25", Delivered: true}, true, false, RebuildToday},
+		{"refresh undelivered book gone", State{Date: "2026-11-25"}, true, false, RebuildToday},
 		{"refresh on a new day", State{Date: "2026-11-24", Delivered: true}, true, true, Build},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,6 +77,8 @@ func TestStaleRegexTitle(t *testing.T) {
 		"AAB x 2026-11-24.epub",
 		"A+B (x) 2026-11-24.epub.bak",
 		"A+B (x) 2026-11-2.epub",
+		"A+B (x) 2026-11-24 (0).epub",
+		"A+B (x) 2026-11-24 (01).epub",
 	}
 	got := Stale(names, "A+B (x)", "A+B (x) 2026-11-25.epub")
 	if len(got) != 1 || got[0] != names[0] {
@@ -107,12 +113,37 @@ func TestStateRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadStateCorrupt(t *testing.T) {
+func TestLoadStateCorruptIsSetAside(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, stateFile), []byte("{nope"), 0o600); err != nil {
+	bad := filepath.Join(dir, stateFile)
+	if err := os.WriteFile(bad, []byte("{nope"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadState(dir); err == nil {
-		t.Error("corrupt state must be an error")
+	s, err := LoadState(dir)
+	if !errors.Is(err, ErrCorruptState) {
+		t.Fatalf("err = %v, want ErrCorruptState", err)
+	}
+	if s != (State{}) {
+		t.Errorf("state %+v, want zero", s)
+	}
+	if _, err := os.Stat(bad); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("bad file still in place: %v", err)
+	}
+	if raw, err := os.ReadFile(bad + ".corrupt"); err != nil || string(raw) != "{nope" {
+		t.Errorf(".corrupt file: %q, %v", raw, err)
+	}
+	if s, err := LoadState(dir); err != nil || s != (State{}) {
+		t.Errorf("second load: %+v, %v", s, err)
+	}
+}
+
+func TestLoadStateIOErrorStaysHard(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, stateFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadState(dir)
+	if err == nil || errors.Is(err, ErrCorruptState) {
+		t.Errorf("err = %v, want a plain I/O error", err)
 	}
 }

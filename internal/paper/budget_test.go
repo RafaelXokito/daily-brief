@@ -1,6 +1,7 @@
 package paper
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -53,7 +54,7 @@ func TestSplitBudgetTooSmall(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), itoa(2*reserve)) {
+	if !strings.Contains(err.Error(), strconv.FormatInt(2*reserve, 10)) {
 		t.Errorf("error should name the smallest budget %d: %v", 2*reserve, err)
 	}
 	if _, err := SplitBudget(2*reserve, cfg); err != nil {

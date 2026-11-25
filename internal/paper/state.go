@@ -25,6 +25,11 @@ type State struct {
 	Delivered bool   `json:"delivered"` // whether that edition reached Dropbox
 }
 
+// ErrCorruptState is wrapped by the error LoadState returns when the state
+// file did not parse. The file is moved aside to <name>.corrupt and the
+// returned State is the zero one, so the caller can warn and carry on.
+var ErrCorruptState = errors.New("paper: corrupt state")
+
 // LoadState reads the state in dir. A missing file is the zero State.
 func LoadState(dir string) (State, error) {
 	var s State
@@ -36,7 +41,11 @@ func LoadState(dir string) (State, error) {
 		return s, fmt.Errorf("paper: read state: %w", err)
 	}
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return State{}, fmt.Errorf("paper: parse state: %w", err)
+		bad := filepath.Join(dir, stateFile)
+		if rerr := os.Rename(bad, bad+".corrupt"); rerr != nil {
+			return State{}, fmt.Errorf("paper: parse state: %w; could not set it aside: %v", err, rerr)
+		}
+		return State{}, fmt.Errorf("%w: moved to %s.corrupt: %v", ErrCorruptState, stateFile, err)
 	}
 	return s, nil
 }
@@ -56,6 +65,10 @@ func SaveState(dir string, s State) error {
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		tmp.Close()
+		return fmt.Errorf("paper: save state: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return fmt.Errorf("paper: save state: %w", err)
 	}
@@ -116,7 +129,7 @@ func FileName(title, date string, rebuild int) string {
 // to delete: those matching daily-brief's own pattern for title, except
 // keep. Anything else in the folder is never returned.
 func Stale(names []string, title, keep string) []string {
-	re := regexp.MustCompile(`^` + regexp.QuoteMeta(fileTitle(title)) + ` \d{4}-\d{2}-\d{2}( \(\d+\))?\.epub$`)
+	re := regexp.MustCompile(`^` + regexp.QuoteMeta(fileTitle(title)) + ` \d{4}-\d{2}-\d{2}( \([1-9]\d*\))?\.epub$`)
 	var out []string
 	for _, n := range names {
 		if n != keep && re.MatchString(n) {

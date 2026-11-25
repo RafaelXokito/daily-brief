@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,16 +13,14 @@ import (
 	"github.com/RafaelXokito/daily-brief/internal/dropbox"
 )
 
-func itoa(n int64) string { return strconv.FormatInt(n, 10) }
-
 type fakeDropbox struct {
-	mu          sync.Mutex
-	requests    []string // "upload <path>", "delete <path>"
-	files       []string
-	uploadCode  int
-	uploadBody  string
-	deleteCode  int
-	uploadedLen int
+	mu         sync.Mutex
+	requests   []string // "upload <path>", "delete <path>"
+	files      []string
+	uploadCode int
+	uploadBody string
+	deleteCode int
+	uploaded   []byte
 }
 
 func newFakeDropbox(t *testing.T, files []string) (*fakeDropbox, *dropbox.Client) {
@@ -40,7 +37,7 @@ func newFakeDropbox(t *testing.T, files []string) (*fakeDropbox, *dropbox.Client
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.requests = append(f.requests, "upload "+arg.Path)
-		f.uploadedLen = len(data)
+		f.uploaded = data
 		if f.uploadCode != 0 {
 			w.WriteHeader(f.uploadCode)
 			io.WriteString(w, f.uploadBody)
@@ -99,6 +96,9 @@ func TestDelivererUploadsThenDeletes(t *testing.T) {
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("warns %v err %v", warns, err)
 	}
+	if string(f.uploaded) != "book" {
+		t.Errorf("uploaded %q, want %q", f.uploaded, "book")
+	}
 	want := []string{
 		"upload /Apps/Rakuten Kobo/The Daily Brief 2026-11-25 (2).epub",
 		"delete /Apps/Rakuten Kobo/The Daily Brief 2026-11-23.epub",
@@ -114,6 +114,9 @@ func TestDelivererNeverDeletesTheUploadedFile(t *testing.T) {
 	f, c := newFakeDropbox(t, existing)
 	if _, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), testName, []byte("b")); err != nil {
 		t.Fatal(err)
+	}
+	if string(f.uploaded) != "b" {
+		t.Errorf("uploaded %q", f.uploaded)
 	}
 	for _, r := range f.requests {
 		if r == "delete /F/"+testName {
