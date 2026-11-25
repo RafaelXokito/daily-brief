@@ -724,6 +724,7 @@ Where a source article could be fetched, the story is a long summary of it, so t
 Stories without a usable source are written from the research digest alone.
 Each story ends with a `[source]` link to the article it summarises (only http and https links), followed by "From <site>".
 The front page has the day's two or three biggest stories first, each with a "continued in" link to its chapter, then "In Brief": one line per other story, grouped under its topic in chapter order.
+Each chapter's lead story carries one small picture, the source article's own preview image, scaled to at most 800 px wide and compressed to under 90 KB (at most 1 MB for the whole book); the front page has none, and a picture that cannot be fetched safely is simply left out (the colophon counts them).
 Only today's paper stays on the Kobo: after a successful upload, older editions that daily-brief created are deleted from Dropbox, and the Kobo drops them on its next sync.
 
 The server keeps its own config, topics and journals, separate from your laptop's.

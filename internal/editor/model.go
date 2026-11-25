@@ -38,6 +38,9 @@ type Story struct {
 	Fallback bool
 	// URL is the item's source, never the model's.
 	URL string
+	// Image is the book-internal file name of the story's picture, such as
+	// "ch1.jpg", or "". paper.Run sets it on chapter leads; the model never does.
+	Image string
 }
 
 // Chapter is a topic's stories.

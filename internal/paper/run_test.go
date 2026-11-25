@@ -121,12 +121,30 @@ func (f *fakeFetch) fetch(_ context.Context, urls []string) map[string]fetch.Art
 	out := map[string]fetch.Article{}
 	for _, u := range urls {
 		if strings.HasSuffix(u, "/a") {
-			out[u] = fetch.Article{Text: "The widget team shipped a release after a long wait.", Words: 10}
+			out[u] = fetch.Article{Text: "The widget team shipped a release after a long wait.", Words: 10, Image: u + ".jpg"}
 		} else {
 			out[u] = fetch.Article{Err: fetch.ErrTooShort}
 		}
 	}
 	return out
+}
+
+// fakePictures returns a JPEG-looking picture of size bytes for each URL,
+// or an error when size is 0.
+type fakePictures struct {
+	mu   sync.Mutex
+	size int
+	urls []string
+}
+
+func (f *fakePictures) picture(_ context.Context, url string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.urls = append(f.urls, url)
+	if f.size == 0 {
+		return nil, errors.New("no picture")
+	}
+	return append([]byte{0xff, 0xd8, 0xff}, make([]byte, f.size-3)...), nil
 }
 
 type fakeDeliverer struct {
@@ -155,6 +173,7 @@ type runEnv struct {
 	cfg     config.Config
 	backend *runBackend
 	fetch   *fakeFetch
+	picture *fakePictures
 	deliver *fakeDeliverer
 	dir     string
 	log     *bytes.Buffer
@@ -168,7 +187,7 @@ func newRunEnv(t *testing.T) *runEnv {
 	cfg.HistoryDays = 0
 	cfg.Topics = []config.Topic{{Name: "Alpha"}, {Name: "Beta"}}
 	cfg.Paper.TokenBudget = 2_000_000
-	return &runEnv{cfg: cfg, backend: &runBackend{editorTokens: 1000}, fetch: &fakeFetch{}, deliver: &fakeDeliverer{}, dir: t.TempDir(), log: &bytes.Buffer{}}
+	return &runEnv{cfg: cfg, backend: &runBackend{editorTokens: 1000}, fetch: &fakeFetch{}, picture: &fakePictures{}, deliver: &fakeDeliverer{}, dir: t.TempDir(), log: &bytes.Buffer{}}
 }
 
 func (e *runEnv) run(o Options) (Report, error) {
@@ -177,7 +196,7 @@ func (e *runEnv) run(o Options) (Report, error) {
 
 func (e *runEnv) runCtx(ctx context.Context, o Options) (Report, error) {
 	o.Log = e.log
-	d := Deps{Backend: e.backend, Fetch: e.fetch.fetch, Now: func() time.Time { return runNow }, Dir: e.dir}
+	d := Deps{Backend: e.backend, Fetch: e.fetch.fetch, Picture: e.picture.picture, Now: func() time.Time { return runNow }, Dir: e.dir}
 	if !o.NoDeliver {
 		d.Deliverer = e.deliver
 	}
@@ -253,7 +272,7 @@ func TestRunConfigErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newRunEnv(t)
-			d := Deps{Backend: e.backend, Fetch: e.fetch.fetch, Now: func() time.Time { return runNow }, Dir: e.dir}
+			d := Deps{Backend: e.backend, Fetch: e.fetch.fetch, Picture: e.picture.picture, Now: func() time.Time { return runNow }, Dir: e.dir}
 			if tc.noBackend {
 				d.Backend = nil
 			}
@@ -863,5 +882,74 @@ func TestRunPassesFrontPageChoice(t *testing.T) {
 
 	if len(got) != 2 || got[0].Topic != "Alpha" || !got[0].FrontPage || got[1].Topic != "Beta" || got[1].FrontPage {
 		t.Fatalf("chapters = %+v, want Alpha on and Beta off the front page", got)
+	}
+}
+
+func TestRunImagesCapped(t *testing.T) {
+	e := newRunEnv(t)
+	e.cfg.Topics = []config.Topic{{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"}, {Name: "Delta"}}
+	e.picture.size = 400_000
+	if _, err := e.run(Options{NoDeliver: true}); err != nil {
+		t.Fatal(err)
+	}
+	book, err := os.ReadFile(filepath.Join(e.dir, "The Daily Brief 2026-11-25.epub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(e.picture.urls)
+	want := []string{"https://example.com/alpha/a.jpg", "https://example.com/beta/a.jpg", "https://example.com/delta/a.jpg", "https://example.com/gamma/a.jpg"}
+	if !slices.Equal(e.picture.urls, want) {
+		t.Errorf("pictures fetched %v, want the four leads' %v", e.picture.urls, want)
+	}
+	z, err := zip.NewReader(bytes.NewReader(book), int64(len(book)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	total := 0
+	for _, f := range z.File {
+		if strings.HasPrefix(f.Name, "EPUB/img/") {
+			names = append(names, f.Name)
+			total += int(f.UncompressedSize64)
+		}
+	}
+	if !slices.Equal(names, []string{"EPUB/img/ch1.jpg", "EPUB/img/ch2.jpg"}) {
+		t.Errorf("pictures in the book %v, want ch1.jpg and ch2.jpg", names)
+	}
+	if total > 1<<20 {
+		t.Errorf("pictures total %d bytes, want at most 1 MiB", total)
+	}
+	for ch, want := range map[string]bool{"ch1": true, "ch2": true, "ch3": false, "ch4": false} {
+		body := string(epubFile(t, book, "EPUB/"+ch+".xhtml"))
+		if got := strings.Contains(body, `<img src="img/`+ch+`.jpg" alt="Edited story"/>`); got != want {
+			t.Errorf("%s picture shown = %v, want %v\n%s", ch, got, want, body)
+		}
+	}
+	if strings.Contains(string(epubFile(t, book, "EPUB/front.xhtml")), "<img") {
+		t.Error("the front page has a picture")
+	}
+	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "pictures: 2 of 4") {
+		t.Errorf("colophon lacks pictures: 2 of 4\n%s", c)
+	}
+}
+
+func TestRunPictureFailuresAreSkipped(t *testing.T) {
+	e := newRunEnv(t)
+	r, err := e.run(Options{NoDeliver: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Warnings) != 0 {
+		t.Errorf("warnings %v, want none for missing pictures", r.Warnings)
+	}
+	book, err := os.ReadFile(r.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "pictures: 0 of 2") {
+		t.Errorf("colophon lacks pictures: 0 of 2\n%s", c)
+	}
+	if strings.Contains(string(epubFile(t, book, "EPUB/ch1.xhtml")), "<img") {
+		t.Error("a failed picture left an img element")
 	}
 }

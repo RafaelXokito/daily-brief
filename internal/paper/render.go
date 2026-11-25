@@ -25,6 +25,8 @@ type Meta struct {
 	Over               int64
 	Summarised, Failed int
 	Cut                []string
+	// Pictures of PictureCandidates chapter leads with a preview image got one.
+	Pictures, PictureCandidates int
 }
 
 //go:embed templates/*.xhtml
@@ -64,6 +66,7 @@ type placed struct {
 type storyView struct {
 	ID, Headline, Standfirst, Dateline, Host, URL string
 	DropCap, DropRest                             string
+	Image                                         string // the lead's picture, "img/chN.jpg", or ""
 	Paragraphs                                    []string
 	Act                                           bool
 }
@@ -76,6 +79,7 @@ type chapterView struct {
 type colophonView struct {
 	Title, Model, Date, Spent, Budget, Over, Cut string
 	Issue, Summarised, Failed, Fallbacks         int
+	Pictures, PictureCandidates                  int
 }
 
 // Render returns the paper's pages in spine order: front.xhtml, one
@@ -102,6 +106,9 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 			}
 			if _, seen := stories[s.ID]; !seen {
 				stories[s.ID] = placed{chapter: n - 1, topic: titleCase(clean(c.Topic)), title: title, lead: sv.Standfirst, act: sv.Act}
+			}
+			if s.Placement == "lead" && s.Image != "" {
+				sv.Image = "img/" + s.Image
 			}
 			if s.Placement == "lead" && len(sv.Paragraphs) > 0 {
 				if c, rest := dropCap(sv.Paragraphs[0]); c != "" {
@@ -169,6 +176,7 @@ func colophon(p editor.Paper, m Meta) colophonView {
 		Title: clean(m.Title), Model: clean(m.Model), Date: p.Date.Format("Monday, 2 January 2006"),
 		Spent: HumanTokens(m.Spent), Cut: strings.Join(cleanAll(m.Cut), ", "),
 		Issue: m.Issue, Summarised: m.Summarised, Failed: m.Failed, Fallbacks: p.Fallbacks,
+		Pictures: m.Pictures, PictureCandidates: m.PictureCandidates,
 	}
 	if m.Budget > 0 {
 		v.Budget = HumanTokens(m.Budget)

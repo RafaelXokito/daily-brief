@@ -5,5 +5,6 @@
 {{if .Model}}<p class="center">Edited by {{.Model}}.</p>
 {{end}}<p class="center">{{.Spent}} tokens spent{{if .Budget}} of a budget of {{.Budget}}{{end}}{{if .Over}}, over by {{.Over}}{{end}}.</p>
 <p class="center">Sources summarised: {{.Summarised}}. Sources that failed: {{.Failed}}. Stories set by the editor's fallback: {{.Fallbacks}}.</p>
-{{if .Cut}}<p class="center">Topics failed or cut: {{.Cut}}.</p>
+{{if .PictureCandidates}}<p class="center">Lead pictures: {{.Pictures}} of {{.PictureCandidates}}.</p>
+{{end}}{{if .Cut}}<p class="center">Topics failed or cut: {{.Cut}}.</p>
 {{end}}<p class="center">Set in IM Fell English and UnifrakturMaguntia, under the SIL Open Font License.</p>

@@ -377,3 +377,37 @@ func TestRenderFrontLayout(t *testing.T) {
 	}
 	assertXML(t, "front", front)
 }
+
+func TestRenderLeadImageOnly(t *testing.T) {
+	p := samplePaper()
+	p.Chapters[0].Stories[0].Image = "ch1.jpg"
+	p.Chapters[0].Stories[1].Image = "stray.jpg" // not the lead: never shown
+	chs := Render(p, sampleMeta())
+	ch1 := chs[1].Body
+	if n := strings.Count(ch1, "<img"); n != 1 {
+		t.Fatalf("chapter one has %d pictures, want 1\n%s", n, ch1)
+	}
+	img := `<img src="img/ch1.jpg" alt="Framework ships a quieter release"/>`
+	head := `<h2 class="story" id="t0i0">Framework ships a quieter release</h2>`
+	i, h, s := strings.Index(ch1, img), strings.Index(ch1, head), strings.Index(ch1, `<p class="standfirst">`)
+	if i < 0 || h < 0 || !(h < i && i < s) {
+		t.Errorf("picture not right after the lead's headline\n%s", ch1)
+	}
+	assertXML(t, "ch1.xhtml", ch1)
+	for _, c := range chs {
+		if c.File != "ch1.xhtml" && strings.Contains(c.Body, "<img") {
+			t.Errorf("%s has a picture\n%s", c.File, c.Body)
+		}
+	}
+}
+
+func TestRenderColophonPictures(t *testing.T) {
+	m := sampleMeta()
+	if body := Render(samplePaper(), m)[3].Body; strings.Contains(body, "pictures") {
+		t.Errorf("colophon mentions pictures when there were none to fetch\n%s", body)
+	}
+	m.Pictures, m.PictureCandidates = 1, 3
+	if body := Render(samplePaper(), m)[3].Body; !strings.Contains(body, "pictures: 1 of 3") {
+		t.Errorf("colophon lacks the picture count\n%s", body)
+	}
+}

@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RafaelXokito/daily-brief/internal/brief"
@@ -18,7 +20,11 @@ import (
 	"github.com/RafaelXokito/daily-brief/internal/editor"
 	"github.com/RafaelXokito/daily-brief/internal/epub"
 	"github.com/RafaelXokito/daily-brief/internal/fetch"
+	"github.com/RafaelXokito/daily-brief/internal/picture"
 )
+
+// maxPictureBytes caps the pictures of one book together.
+const maxPictureBytes = 1 << 20
 
 // Options are the paper command's flags. Budget, when positive, overrides
 // paper.token_budget for this run; Log receives the progress lines and
@@ -29,12 +35,13 @@ type Options struct {
 	Log                io.Writer
 }
 
-// Deps are what a run talks to. Fetch defaults to fetch.Articles, Now to
-// time.Now and Dir to brief.DataDir()/papers. Deliverer may be nil only
-// with NoDeliver.
+// Deps are what a run talks to. Fetch defaults to fetch.Articles, Picture
+// to fetch.FetchImage followed by picture.Prepare, Now to time.Now and Dir
+// to brief.DataDir()/papers. Deliverer may be nil only with NoDeliver.
 type Deps struct {
 	Backend   brief.Backend
 	Fetch     func(context.Context, []string) map[string]fetch.Article
+	Picture   func(ctx context.Context, url string) ([]byte, error)
 	Deliverer Deliverer
 	Now       func() time.Time
 	Dir       string
@@ -45,6 +52,9 @@ func (d Deps) withDefaults() Deps {
 		d.Fetch = func(ctx context.Context, urls []string) map[string]fetch.Article {
 			return fetch.Articles(ctx, urls, fetch.Options{})
 		}
+	}
+	if d.Picture == nil {
+		d.Picture = fetchPicture
 	}
 	if d.Now == nil {
 		d.Now = time.Now
@@ -205,7 +215,7 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	if len(in.Chapters) == 0 {
 		return nil, ErrNoStories
 	}
-	in = x.withArticles(in)
+	in, images := x.withArticles(in)
 	// The editor gets what research left of the whole budget, so a research
 	// overspend comes out of the editor's share; at 0 it falls back
 	// mechanically.
@@ -222,6 +232,10 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	if x.r.Over > 0 {
 		x.warn(fmt.Sprintf("this paper went over its token budget by %s tokens (%s of %s)", HumanTokens(x.r.Over), HumanTokens(x.r.Spent), HumanTokens(x.r.Budget)))
 	}
+	p, pics, candidates := x.pictures(p, in, images)
+	if err := x.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("paper: cancelled while fetching pictures: %w", err)
+	}
 	var topics []string
 	for _, c := range p.Chapters {
 		if len(c.Stories) > 0 {
@@ -231,12 +245,12 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	}
 	title := x.cfg.Paper.TitleOrDefault()
 	pages := Render(p, Meta{Title: title, Issue: issue, Model: j.Model, Spent: x.r.Spent, Budget: x.r.Budget, Over: x.r.Over,
-		Summarised: x.r.Summarised, Failed: x.r.Failed, Cut: cut(j)})
+		Summarised: x.r.Summarised, Failed: x.r.Failed, Cut: cut(j), Pictures: len(pics), PictureCandidates: candidates})
 	png, err := cover.Render(cover.Content{Title: title, Issue: issue, Date: x.day, Topics: topics, Lead: p.Front.CoverLine})
 	if err != nil {
 		return nil, fmt.Errorf("paper: cover: %w", err)
 	}
-	return epub.Build(epub.Book{Title: title + " · " + x.day.Format("2 January 2006"), Identifier: editionID(x.date, rebuild), Date: x.day, Cover: png, Chapters: pages})
+	return epub.Build(epub.Book{Title: title + " · " + x.day.Format("2 January 2006"), Identifier: editionID(x.date, rebuild), Date: x.day, Cover: png, Chapters: pages, Images: pics})
 }
 
 // journal returns today's journal and what this run spent on it: the
@@ -289,8 +303,9 @@ func (x *run) journal(budget int64) (*brief.Journal, int64) {
 var runEditor = editor.Run
 
 // withArticles fetches each item's source once and returns a copy of in
-// with the articles that came through, counting both outcomes.
-func (x *run) withArticles(in editor.Input) editor.Input {
+// with the articles that came through, counting both outcomes, and the
+// preview image URL of each source that has one.
+func (x *run) withArticles(in editor.Input) (editor.Input, map[string]string) {
 	var urls []string
 	seen := map[string]bool{}
 	for _, c := range in.Chapters {
@@ -302,13 +317,17 @@ func (x *run) withArticles(in editor.Input) editor.Input {
 		}
 	}
 	if len(urls) == 0 {
-		return in
+		return in, nil
 	}
 	x.logf("fetching %d sources", len(urls))
 	articles := x.d.Fetch(x.ctx, urls)
-	texts := map[string]string{}
+	texts, images := map[string]string{}, map[string]string{}
 	for _, u := range urls {
-		if a := articles[u]; a.Err == nil && strings.TrimSpace(a.Text) != "" {
+		a := articles[u]
+		if a.Image != "" {
+			images[u] = a.Image
+		}
+		if a.Err == nil && strings.TrimSpace(a.Text) != "" {
 			texts[u] = strings.TrimSpace(a.Text)
 			x.r.Summarised++
 		} else {
@@ -326,7 +345,94 @@ func (x *run) withArticles(in editor.Input) editor.Input {
 		c.Items = items
 		out.Chapters[i] = c
 	}
-	return out
+	return out, images
+}
+
+// fetchPicture downloads an image through the fetch guard and prepares it
+// for the book.
+func fetchPicture(ctx context.Context, url string) ([]byte, error) {
+	data, _, err := fetch.FetchImage(ctx, url, fetch.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return picture.Prepare(data)
+}
+
+// pictureJobs lists the chapter leads whose source has a preview image,
+// naming each picture chN.jpg after its chapter as Render numbers them.
+func pictureJobs(p editor.Paper, in editor.Input, images map[string]string) []pictureJob {
+	source := map[string]string{} // item id -> source URL
+	for _, c := range in.Chapters {
+		for _, it := range c.Items {
+			source[it.ID] = it.URL
+		}
+	}
+	var jobs []pictureJob
+	n := 0 // only chapters with stories are numbered
+	for ci, c := range p.Chapters {
+		if len(c.Stories) == 0 {
+			continue
+		}
+		n++
+		si := slices.IndexFunc(c.Stories, func(s editor.Story) bool { return s.Placement == "lead" })
+		if si < 0 {
+			continue
+		}
+		if img := images[source[c.Stories[si].ID]]; img != "" {
+			jobs = append(jobs, pictureJob{chapter: ci, story: si, name: fmt.Sprintf("ch%d.jpg", n), url: img})
+		}
+	}
+	return jobs
+}
+
+// pictureJob is one chapter lead's picture: where it goes and what came back.
+type pictureJob struct {
+	chapter, story int
+	name, url      string
+	data           []byte
+}
+
+// pictures fetches a picture for each chapter's lead story whose source
+// has a preview image, at most fetch.DefaultConcurrency at a time, and
+// keeps them in chapter order while the book's pictures stay within
+// maxPictureBytes. A picture that fails is skipped. It returns a copy of p
+// with the kept leads' Image set, the pictures, and how many leads had a
+// preview image.
+func (x *run) pictures(p editor.Paper, in editor.Input, images map[string]string) (editor.Paper, []epub.Image, int) {
+	jobs := pictureJobs(p, in, images)
+	if len(jobs) == 0 {
+		return p, nil, 0
+	}
+	x.logf("fetching %d pictures", len(jobs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, fetch.DefaultConcurrency)
+	for i := range jobs {
+		wg.Add(1)
+		go func(j *pictureJob) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if data, err := x.d.Picture(x.ctx, j.url); err == nil {
+				j.data = data
+			}
+		}(&jobs[i])
+	}
+	wg.Wait()
+	out := p
+	out.Chapters = slices.Clone(p.Chapters)
+	var pics []epub.Image
+	total := 0
+	for _, j := range jobs {
+		if len(j.data) == 0 || total+len(j.data) > maxPictureBytes {
+			continue
+		}
+		total += len(j.data)
+		stories := slices.Clone(out.Chapters[j.chapter].Stories)
+		stories[j.story].Image = j.name
+		out.Chapters[j.chapter].Stories = stories
+		pics = append(pics, epub.Image{Name: j.name, Data: j.data})
+	}
+	return out, pics, len(jobs)
 }
 
 // onFront reports whether a topic's stories may reach the front page: all
