@@ -44,10 +44,19 @@ func storyText(s Story) string {
 	return strings.Join(append([]string{s.Headline, s.Standfirst, s.Dateline}, s.Paragraphs...), "\n")
 }
 
+// citesResearch reports whether text uses "the research", the pipeline's
+// internal name for the digest, which a newspaper never prints.
+func citesResearch(text string) bool {
+	return strings.Contains(strings.ToLower(strings.Join(strings.Fields(text), " ")), "the research")
+}
+
 // checkStory reports whether every number, version, CVE id and money amount
 // in the story appears in its item or article, and every word of the
-// dateline does too.
+// dateline does too. A story that cites "the research" fails.
 func checkStory(s Story, it ItemIn) bool {
+	if citesResearch(storyText(s)) {
+		return false
+	}
 	src := sourceText(it)
 	if !covered(storyText(s), factTokens(src)) {
 		return false
@@ -98,18 +107,19 @@ func newFrontSources(chapters []Chapter, items map[string]ItemIn) frontSources {
 // story, item or article, and every fact in the cover line in any story.
 func (src frontSources) leadsOK(fp FrontPage) bool {
 	for _, l := range fp.Leads {
-		if !covered(strings.Join(append([]string{l.Headline}, l.Paragraphs...), "\n"), factTokens(src.own[l.ID])) {
+		text := strings.Join(append([]string{l.Headline}, l.Paragraphs...), "\n")
+		if citesResearch(text) || !covered(text, factTokens(src.own[l.ID])) {
 			return false
 		}
 	}
-	return covered(fp.CoverLine, factTokens(src.all))
+	return !citesResearch(fp.CoverLine) && covered(fp.CoverLine, factTokens(src.all))
 }
 
 // briefOK reports whether every fact in each sentence of p is in that
 // sentence's own story, item or article.
 func (src frontSources) briefOK(p BriefParagraph) bool {
 	for _, b := range p.Sentences {
-		if !covered(b.Text, factTokens(src.own[b.ID])) {
+		if citesResearch(b.Text) || !covered(b.Text, factTokens(src.own[b.ID])) {
 			return false
 		}
 	}

@@ -46,6 +46,8 @@ func TestPromptCarriesRules(t *testing.T) {
 	for _, want := range []string{
 		"modern newspaper English", "Do not add", "250 to 450", "150 to 300",
 		"one paragraph", "say so", "exactly once", `"placement":"lead|story|brief"`,
+		`"the research"`, `"the digest"`, `"the brief"`, "according to Tailscale's advisory",
+		"Reuters reported", "reports differ on", "could not be confirmed independently", "only one source reports this",
 	} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("chapter system prompt lacks %q", want)
@@ -54,6 +56,7 @@ func TestPromptCarriesRules(t *testing.T) {
 	fsys, _ := frontPrompt(Input{}, nil)
 	for _, want := range []string{
 		`"cover_line"`, `"in_brief"`, "Do not add", "two to four sentences",
+		`"the research"`, `"the digest"`, "Reuters reported", "only one source reports this",
 		`{"leads":[{"id":"","headline":"","paragraphs":[""]}],"in_brief":[{"topic":"","sentences":[{"id":"","text":""}]}],"cover_line":""}`,
 	} {
 		if !strings.Contains(fsys, want) {

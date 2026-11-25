@@ -84,3 +84,36 @@ func TestCheckStoryHost(t *testing.T) {
 		t.Fatal("host digits are source text")
 	}
 }
+
+func TestCheckStoryRejectsTheResearch(t *testing.T) {
+	it := ItemIn{Prose: "Some prose."}
+	for name, s := range map[string]Story{
+		"paragraph":  {Paragraphs: []string{"Patch today, according to the research."}},
+		"mixed case": {Paragraphs: []string{"The Research advises caution."}},
+		"headline":   {Headline: "What THE RESEARCH says"},
+		"standfirst": {Standfirst: "The research found it."},
+	} {
+		if checkStory(s, it) {
+			t.Errorf("%s should fail", name)
+		}
+	}
+	if !checkStory(Story{Paragraphs: []string{"Researchers say a new research lab opened."}}, it) {
+		t.Error("other uses of the word research should pass")
+	}
+}
+
+func TestFrontChecksRejectTheResearch(t *testing.T) {
+	src := newFrontSources([]Chapter{{Stories: []Story{{ID: "a"}}}}, map[string]ItemIn{})
+	if src.briefOK(BriefParagraph{Sentences: []BriefSentence{{ID: "a", Text: "According to the research, it fell."}}}) {
+		t.Error("in brief sentence should fail")
+	}
+	if !src.briefOK(BriefParagraph{Sentences: []BriefSentence{{ID: "a", Text: "It fell."}}}) {
+		t.Error("clean sentence should pass")
+	}
+	if src.leadsOK(FrontPage{Leads: []FrontLead{{ID: "a", Headline: "H", Paragraphs: []string{"The research says so."}}}, CoverLine: "C"}) {
+		t.Error("lead should fail")
+	}
+	if src.leadsOK(FrontPage{Leads: []FrontLead{{ID: "a", Headline: "H", Paragraphs: []string{"Fine."}}}, CoverLine: "Per the research"}) {
+		t.Error("cover line should fail")
+	}
+}

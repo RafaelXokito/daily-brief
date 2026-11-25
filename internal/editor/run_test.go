@@ -342,3 +342,16 @@ func TestRunSkipsFrontWhenCancelled(t *testing.T) {
 		t.Fatalf("want fallback front: %+v", p.Front)
 	}
 }
+
+func TestRunStoryCitingTheResearchFallsBack(t *testing.T) {
+	in := Input{Chapters: []ChapterIn{{Topic: "Alpha", Items: []ItemIn{
+		{ID: "t0i0", Headline: "Alpha one", Prose: "Prose a.", Host: "a.example"},
+	}}}}
+	reply := `{"stories":[{"id":"t0i0","headline":"Alpha one","paragraphs":["Patch now, according to the research."],"placement":"lead"}]}`
+	fb := &fakeBackend{chapter: func(_, _ string) string { return reply }, front: "not json"}
+	p := Run(context.Background(), fb, in, Budget{Tokens: 1_000_000}, 1)
+	s := p.Chapters[0].Stories[0]
+	if !s.Fallback || strings.Contains(strings.ToLower(strings.Join(s.Paragraphs, " ")), "the research") {
+		t.Fatalf("story should fall back: %+v", s)
+	}
+}
