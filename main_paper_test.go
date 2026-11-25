@@ -255,3 +255,34 @@ func TestDropboxStatusMissingArchiveFolder(t *testing.T) {
 		t.Errorf("status output: %q", got)
 	}
 }
+
+func TestDropboxStatusArchiveListingFailureIsNotFatal(t *testing.T) {
+	isolate(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var arg struct{ Path string }
+		_ = json.NewDecoder(r.Body).Decode(&arg)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/token"):
+			_, _ = w.Write([]byte(`{"access_token":"a","expires_in":14400}`))
+		case arg.Path == "/Daily Brief Archive":
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"error_summary":"nope"}`))
+		default:
+			_, _ = w.Write([]byte(`{"entries":[],"has_more":false}`))
+		}
+	}))
+	defer srv.Close()
+	cfg := config.Default()
+	cfg.Paper.Dropbox.AppKey = "key"
+	if err := dropbox.SaveRefreshToken(dropbox.DefaultTokenPath(), "refresh"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	c := dropbox.Client{HTTP: srv.Client(), TokenURL: srv.URL + "/token", APIBase: srv.URL}
+	if err := dropboxStatus(context.Background(), cfg, &out, &c); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "archive: unavailable (") || !strings.Contains(got, "Dropbox is connected") {
+		t.Errorf("status output: %q", got)
+	}
+}

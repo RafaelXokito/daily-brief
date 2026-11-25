@@ -498,3 +498,17 @@ func TestMoveOtherConflictIsPlainError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestListNormalisesRootAndTrailingSlash(t *testing.T) {
+	for in, want := range map[string]string{"/": "", "": "", "/A/": "/A", "/A": "/A"} {
+		f, c := newFake(t)
+		f.handlers["/2/files/list_folder"] = okJSON(`{"entries":[],"has_more":false}`)
+		if _, err := c.List(context.Background(), in); err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(f.find("/2/files/list_folder").Body, &body); err != nil || body["path"] != want {
+			t.Errorf("List(%q) sent path %v, want %q (%v)", in, body["path"], want, err)
+		}
+	}
+}

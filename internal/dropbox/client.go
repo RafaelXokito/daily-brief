@@ -108,7 +108,9 @@ func (c *Client) Upload(ctx context.Context, path string, data []byte) error {
 }
 
 // List returns the names of the files (not folders) in folder, following pages.
+// The root is "/" here and "" for the API; a trailing slash is dropped.
 func (c *Client) List(ctx context.Context, folder string) ([]string, error) {
+	folder = strings.TrimRight(folder, "/")
 	var names []string
 	endpoint, body := "files/list_folder", map[string]any{"path": folder, "limit": listPageLimit}
 	for {

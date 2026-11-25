@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/RafaelXokito/daily-brief/internal/brief"
@@ -146,13 +147,15 @@ func dropboxStatus(ctx context.Context, cfg config.Config, out io.Writer, base *
 	editions := len(paper.Stale(names, cfg.Paper.TitleOrDefault(), ""))
 	archive := cfg.Paper.ArchiveFolderOrDefault()
 	archived, err := base.List(ctx, archive)
-	if err != nil && !errors.Is(err, dropbox.ErrNotFound) {
-		return err
+	_, _ = fmt.Fprintf(out, "Dropbox is connected. %s holds %d %s, %d daily-brief %s.\n",
+		folder, len(names), plural(len(names), "file"), editions, plural(editions, "edition"))
+	switch {
+	case err != nil && !errors.Is(err, dropbox.ErrNotFound):
+		_, _ = fmt.Fprintf(out, "archive: unavailable (%s)\n", shortReason(err))
+	default:
+		n := len(paper.Stale(archived, cfg.Paper.TitleOrDefault(), ""))
+		_, _ = fmt.Fprintf(out, "%s holds %d archived %s.\n", archive, n, plural(n, "edition"))
 	}
-	archivedEditions := len(paper.Stale(archived, cfg.Paper.TitleOrDefault(), ""))
-	_, _ = fmt.Fprintf(out, "Dropbox is connected. %s holds %d %s, %d daily-brief %s. %s holds %d archived %s.\n",
-		folder, len(names), plural(len(names), "file"), editions, plural(editions, "edition"),
-		archive, archivedEditions, plural(archivedEditions, "edition"))
 	return nil
 }
 
@@ -266,4 +269,13 @@ func paperBudgetLines(cfg config.Config) string {
 	}
 	return fmt.Sprintf("Paper: %s tokens (research %s, editor %s reserved first)\n",
 		paper.HumanTokens(total), paper.HumanTokens(split.Research), paper.HumanTokens(split.Editor))
+}
+
+// shortReason is the first line of err, cut to a length fit for a status line.
+func shortReason(err error) string {
+	msg, _, _ := strings.Cut(err.Error(), "\n")
+	if r := []rune(msg); len(r) > 100 {
+		msg = string(r[:100]) + "..."
+	}
+	return msg
 }
