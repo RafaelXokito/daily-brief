@@ -42,7 +42,7 @@ func (d *dropboxDeliverer) Deliver(ctx context.Context, name string, data []byte
 	}
 	var warnings []string
 	for _, stale := range Stale(names, d.title, name) {
-		if err := d.c.Delete(ctx, d.path(stale)); err != nil {
+		if err := d.c.Delete(ctx, d.path(stale)); err != nil && !errors.Is(err, dropbox.ErrNotFound) {
 			warnings = append(warnings, fmt.Sprintf("could not delete older edition %s: %v", stale, err))
 		}
 	}

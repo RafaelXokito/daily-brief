@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/RafaelXokito/daily-brief/internal/dropbox"
 )
@@ -20,6 +21,7 @@ type fakeDropbox struct {
 	uploadCode int
 	uploadBody string
 	deleteCode int
+	deleteBody string
 	uploaded   []byte
 }
 
@@ -64,7 +66,11 @@ func newFakeDropbox(t *testing.T, files []string) (*fakeDropbox, *dropbox.Client
 		f.requests = append(f.requests, "delete "+body.Path)
 		if f.deleteCode != 0 {
 			w.WriteHeader(f.deleteCode)
-			io.WriteString(w, `{"error_summary":"boom"}`)
+			body := f.deleteBody
+			if body == "" {
+				body = `{"error_summary":"boom"}`
+			}
+			io.WriteString(w, body)
 			return
 		}
 		io.WriteString(w, `{}`)
@@ -73,6 +79,7 @@ func newFakeDropbox(t *testing.T, files []string) (*fakeDropbox, *dropbox.Client
 	t.Cleanup(srv.Close)
 	return f, &dropbox.Client{
 		AppKey: "k", RefreshToken: "r", HTTP: srv.Client(),
+		Sleep:    func(context.Context, time.Duration) error { return nil },
 		TokenURL: srv.URL + "/token", APIBase: srv.URL + "/api", ContentBase: srv.URL + "/content",
 	}
 }
@@ -167,6 +174,9 @@ func TestDelivererDeleteFailureIsNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete failure must not fail the delivery: %v", err)
 	}
+	if len(warns) != 3 {
+		t.Fatalf("warnings %v, want one per stale file", warns)
+	}
 	if len(warns) == 0 {
 		t.Fatal("expected a warning")
 	}
@@ -181,5 +191,14 @@ func TestDelivererListFailureIsAWarning(t *testing.T) {
 	warns, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), testName, []byte("b"))
 	if err != nil || len(warns) == 0 {
 		t.Errorf("warns %v err %v", warns, err)
+	}
+}
+
+func TestDelivererDeleteNotFoundIsSuccess(t *testing.T) {
+	f, c := newFakeDropbox(t, existing)
+	f.deleteCode, f.deleteBody = 409, `{"error_summary":"path_lookup/not_found/.."}`
+	warns, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
+	if err != nil || len(warns) != 0 {
+		t.Errorf("already-gone file must not warn: warns %v err %v", warns, err)
 	}
 }
