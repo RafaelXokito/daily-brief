@@ -10,7 +10,9 @@ import (
 )
 
 // segment is a run of a paragraph's text, a highlighted key phrase when
-// Mark. The template escapes Text and wraps a Mark in <mark class="key">.
+// Mark. The template escapes Text and wraps a Mark in <span class="key">:
+// the Kobo's renderer shows neither <mark> nor its background, so the
+// phrase is underlined.
 type segment struct {
 	Text string
 	Mark bool

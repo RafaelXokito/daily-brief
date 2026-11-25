@@ -344,3 +344,6 @@ Asked by Rafael after reading the edition on the Kobo Libra Colour.
   A picture is logo-like when its URL path names it (logo, icon, favicon, brand, avatar, placeholder or default, as whole words; the host and query are not read), when the original is under 400 px wide or under 300 px tall, or when its four most common colours (4 bits per channel, on a 64 by 64 sample) cover 95% of it.
   A mostly plain background alone is not enough, since a device photographed on white has one.
   Such a picture is scaled to at most 240 px wide and prints at 22% of the width, floated right, wherever it appears: front leads (the main picture too), chapter leads and stories that need a picture.
+- **Highlights the Kobo shows.** The Kobo's renderer for plain EPUB (Adobe RMSDK) did not show `<mark class="key">` or its background.
+  Highlights now render as `<span class="key">`, underlined in the paper's red (#8a1c1c; a renderer that ignores the colour underlines in the text colour), keeping the soft ochre background where it is supported.
+  Never bold: the embedded IM Fell fonts have no bold face.

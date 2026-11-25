@@ -25,16 +25,19 @@ func TestRenderHighlights(t *testing.T) {
 	lead.Highlights = []editor.Highlight{span(t, *lead, 0, "The maintainers"), span(t, *lead, 1, "optional")}
 	ch1 := Render(p, sampleMeta())[1].Body
 	for _, want := range []string{
-		`<p>The cache now <mark class="key">survives restarts</mark>.</p>`,
-		`<p><span class="drop">T</span><mark class="key">he maintainers</mark> published a minor release on Tuesday.</p>`,
-		`<p>Upgrades are <mark class="key">optional</mark>.</p>`,
+		`<p>The cache now <span class="key">survives restarts</span>.</p>`,
+		`<p><span class="drop">T</span><span class="key">he maintainers</span> published a minor release on Tuesday.</p>`,
+		`<p>Upgrades are <span class="key">optional</span>.</p>`,
 	} {
 		if !strings.Contains(ch1, want) {
 			t.Errorf("chapter one lacks %s\n%s", want, ch1)
 		}
 	}
+	if strings.Contains(ch1, "<mark") {
+		t.Errorf("a highlight uses <mark>, which the Kobo does not show\n%s", ch1)
+	}
 	assertXML(t, "ch1.xhtml", ch1)
-	if front := Render(p, sampleMeta())[0].Body; strings.Contains(front, "<mark") {
+	if front := Render(p, sampleMeta())[0].Body; strings.Contains(front, `class="key"`) {
 		t.Errorf("the front page has a highlight\n%s", front)
 	}
 }
@@ -45,7 +48,7 @@ func TestRenderHighlightEscapes(t *testing.T) {
 	s.Paragraphs = []string{"Before <script>alert(\"x\")</script> & \x07after."}
 	s.Highlights = []editor.Highlight{span(t, *s, 0, "<script>alert(\"x\")</script> & \x07after")}
 	ch1 := Render(p, sampleMeta())[1].Body
-	want := `<p>Before <mark class="key">&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt; &amp; after</mark>.</p>`
+	want := `<p>Before <span class="key">&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt; &amp; after</span>.</p>`
 	if !strings.Contains(ch1, want) {
 		t.Errorf("chapter one lacks %s\n%s", want, ch1)
 	}
@@ -73,7 +76,7 @@ func TestRenderIgnoresBadHighlights(t *testing.T) {
 		s.Paragraphs = []string{text}
 		s.Highlights = []editor.Highlight{h}
 		ch1 := Render(p, sampleMeta())[1].Body
-		if strings.Contains(ch1, "<mark") || !strings.Contains(ch1, "<p>"+text+"</p>") {
+		if strings.Contains(ch1, `class="key"`) || !strings.Contains(ch1, "<p>"+text+"</p>") {
 			t.Errorf("%s: want the paragraph whole and unmarked\n%s", name, ch1)
 		}
 	}
@@ -82,7 +85,7 @@ func TestRenderIgnoresBadHighlights(t *testing.T) {
 	s.Paragraphs = []string{text}
 	s.Highlights = []editor.Highlight{{Para: 0, Start: 0, End: 9}, {Para: 0, Start: 4, End: 12}} // overlapping: the second goes
 	ch1 := Render(p, sampleMeta())[1].Body
-	if !strings.Contains(ch1, `<p><mark class="key">Évora ra</mark>ised the fee.</p>`) {
+	if !strings.Contains(ch1, `<p><span class="key">Évora ra</span>ised the fee.</p>`) {
 		t.Errorf("overlapping highlights: want only the first\n%s", ch1)
 	}
 }

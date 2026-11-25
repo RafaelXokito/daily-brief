@@ -731,7 +731,7 @@ Each front page lead and each chapter's lead story carries its picture, and so d
 A front page lead whose story already has a picture in its chapter shows the same file, so the book does not grow.
 The pictures of one book stay under 1.5 MiB together: when they would not fit, the stories that need a picture are dropped first, then the chapter leads, and the front page leads are kept longest.
 A picture that cannot be fetched safely, or that repeats one already in the book (a site's generic logo), is simply left out, and the colophon counts the pictures.
-In the chapters, the editor may highlight up to two short key phrases per story, which print on a soft ochre background; headlines, standfirsts, the front page and fallback stories carry none.
+In the chapters, the editor may highlight up to two short key phrases per story, which print underlined (in the paper's red where the reader supports a coloured underline, on a soft ochre background where it supports one); headlines, standfirsts, the front page and fallback stories carry none.
 Only today's paper stays on the Kobo: after a successful upload, older editions that daily-brief created are deleted from Dropbox, and the Kobo drops them on its next sync.
 
 The server keeps its own config, topics and journals, separate from your laptop's.

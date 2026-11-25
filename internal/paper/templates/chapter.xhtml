@@ -1,4 +1,4 @@
-{{define "segs"}}{{range .}}{{if .Mark}}<mark class="key">{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}{{end -}}
+{{define "segs"}}{{range .}}{{if .Mark}}<span class="key">{{.Text}}</span>{{else}}{{.Text}}{{end}}{{end}}{{end -}}
 {{define "story"}}{{if .Act}}<p class="tag act">Act now</p>
 {{end}}{{if .Standfirst}}<p class="standfirst">{{.Standfirst}}</p>
 {{end}}{{if .Pic}}{{if .Small}}<img class="small-pic" src="{{.Pic}}" alt="{{.Headline}}"/>{{else}}<p class="pic"><img class="story-pic" src="{{.Pic}}" alt="{{.Headline}}"/></p>{{end}}

@@ -328,10 +328,10 @@ func TestRunHighlights(t *testing.T) {
 	for _, tc := range []struct {
 		name, paragraph, want string
 	}{
-		{"valid", "The team ==shipped the widget== at last.", `<p>The team <mark class="key">shipped the widget</mark> at last.</p>`},
+		{"valid", "The team ==shipped the widget== at last.", `<p>The team <span class="key">shipped the widget</span> at last.</p>`},
 		{"unbalanced", "The team ==shipped the widget at last.", `<p>The team shipped the widget at last.</p>`},
 		{"nested", "The ==team ==shipped== widget== ok.", `<p>The team shipped widget ok.</p>`},
-		{"three marks", "==One== and ==two== and ==three==.", `<p><mark class="key">One</mark> and <mark class="key">two</mark> and three.</p>`},
+		{"three marks", "==One== and ==two== and ==three==.", `<p><span class="key">One</span> and <span class="key">two</span> and three.</p>`},
 		{"over twelve words", "==" + strings.TrimSpace(strings.Repeat("very ", 13)) + "== end.", "<p>" + strings.TrimSpace(strings.Repeat("very ", 13)) + " end.</p>"},
 		{"script", "Hi ==<script>alert(x)</script>== there.", `<p>Hi &lt;script&gt;alert(x)&lt;/script&gt; there.</p>`},
 	} {
