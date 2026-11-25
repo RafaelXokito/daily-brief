@@ -101,7 +101,12 @@ func run() error {
 		return dropboxCommand(ctx, args[1], cfg)
 	}
 	ov := overrides{provider: *provider, budget: *budget, topics: *topics}
-	if err := ov.apply(&cfg); err != nil {
+	applied := ov
+	if args[0] == "paper" {
+		// The paper always covers every configured topic.
+		applied.topics = ""
+	}
+	if err := applied.apply(&cfg); err != nil {
 		return err
 	}
 	if err := cfg.Validate(); err != nil {

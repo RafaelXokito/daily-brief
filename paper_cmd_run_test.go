@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -101,5 +105,38 @@ func TestPaperCommandPrintsSummaryWhenNoStoriesAfterResearch(t *testing.T) {
 	}
 	if strings.Contains(line, ": 0 of ") {
 		t.Errorf("stdout = %q, want the research spend counted", line)
+	}
+}
+
+// runMain runs the program's run() with args as its command line.
+func runMain(t *testing.T, args ...string) error {
+	t.Helper()
+	oldArgs, oldFlags := os.Args, flag.CommandLine
+	t.Cleanup(func() { os.Args, flag.CommandLine = oldArgs, oldFlags })
+	os.Args = append([]string{"daily-brief"}, args...)
+	flag.CommandLine = flag.NewFlagSet("daily-brief", flag.ContinueOnError)
+	return run()
+}
+
+// -topics is ignored by the paper: it researches every configured topic.
+func TestPaperIgnoresTopicsFlag(t *testing.T) {
+	isolate(t)
+	b := &cmdBackend{}
+	fakePaperDeps(t, b, nil)
+	cfg := paperTestConfig()
+	cfg.General = false
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runMain(t, "-config", path, "-topics", "Alpha", "-no-deliver", "paper"); err != nil {
+		t.Fatalf("paper: %v", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !slices.Contains(b.topics, "Alpha") || !slices.Contains(b.topics, "Beta") {
+		t.Errorf("researched %v, want both Alpha and Beta", b.topics)
 	}
 }
