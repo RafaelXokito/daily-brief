@@ -476,6 +476,9 @@ the prompt really sent, and `daily-brief budget` plans each first request at
 | `daily-brief auth set-key` / `delete-key` / `status` | Manage the Keychain API key, check credentials |
 | `daily-brief update` | Install the latest release over this binary (see Updates below) |
 | `daily-brief -print` | Print the journal: rendered as in the TUI on a terminal, Markdown exactly as saved when piped (good for scripts / cron) |
+| `daily-brief paper` | Research, write and deliver today's Kobo paper (`-no-deliver` builds it without delivering; see The Kobo paper below) |
+| `daily-brief dropbox login` | Connect Dropbox for paper delivery (see The Kobo paper below) |
+| `daily-brief dropbox status` | Check the Dropbox connection, read-only (see The Kobo paper below) |
 
 Flags can go before or after a subcommand: `daily-brief budget -budget 1000000`
 and `daily-brief auth status -provider aws` both work.
@@ -803,7 +806,7 @@ The editor's share is reserved before research starts, so research can never eat
 A pass starts only if its planned cost plus a safety margin fits in what is left.
 
 The `claude-code` provider cannot stop a pass part-way: the Claude Code CLI has no token limit, and its cache reads count as full tokens in daily-brief's accounting while costing about a tenth in dollars.
-So on `claude-code` the paper keeps a wide margin, 30% (`paper.MarginPercent`), to stay under the budget.
+So on `claude-code` the paper keeps a wide safety margin (currently 30%, sized from test runs) to stay under the budget.
 If a run still spends more than its budget, the overshoot is never hidden.
 It appears in the summary line (`412k of 400k tokens (over by 12k)`), in the colophon, and as a warning on stderr, which lands in the systemd journal on the server.
 
