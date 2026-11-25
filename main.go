@@ -84,13 +84,11 @@ func run() error {
 	if *provider != "" {
 		cfg.Provider.Type = *provider
 	}
-	if created {
+	if created && args[0] != "paper" && args[0] != "dropbox" {
 		fmt.Fprintf(os.Stderr, "Created default config at %s — edit it to choose your topics and budget.\n"+
 			"token_budget is 0 (auto): the recommended baseline for %s is %s tokens. Run `daily-brief budget` for details.\n",
 			*configPath, cfg.Provider.Type, brief.HumanTokens(brief.Baseline(cfg)))
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-	defer stop()
 	if *edit {
 		return openEditor(*configPath)
 	}
@@ -98,6 +96,8 @@ func run() error {
 		return authCommand(args[1], cfg, *configPath)
 	}
 	if args[0] == "dropbox" {
+		ctx, stop := signalContext()
+		defer stop()
 		return dropboxCommand(ctx, args[1], cfg)
 	}
 	ov := overrides{provider: *provider, budget: *budget, topics: *topics}
@@ -109,6 +109,14 @@ func run() error {
 	}
 	if args[0] == "paper" {
 		// The paper has its own budget, so -budget overrides that one.
+		if *budget < 0 {
+			return &exitError{code: 2, err: fmt.Errorf("-budget must not be negative, got %d", *budget)}
+		}
+		if *topics != "" {
+			fmt.Fprintln(os.Stderr, "warning: -topics is ignored by the paper")
+		}
+		ctx, stop := signalContext()
+		defer stop()
 		return paperCommand(ctx, cfg, paperFlags{budget: *budget, refresh: *refresh, noDeliver: *noDeliver}, os.Stdout, os.Stderr)
 	}
 	auto := brief.ResolveBudget(&cfg)
@@ -186,6 +194,11 @@ func run() error {
 	return nil
 }
 
+// signalContext is cancelled by Ctrl-C, SIGTERM or SIGHUP.
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+}
+
 // updateCommand is `daily-brief update`: it installs the latest release
 // over this binary, in the foreground, writing progress to out. A
 // development build has no version to compare, so it refuses.
@@ -200,7 +213,7 @@ func updateCommand(out io.Writer) error {
 	}
 	// Ctrl-C, SIGTERM or SIGHUP stops the download and leaves the old
 	// binary in place, its temporary file removed.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, stop := signalContext()
 	defer stop()
 	v, err := update.Apply(ctx, cur, exe, out)
 	if err != nil || v == "" {

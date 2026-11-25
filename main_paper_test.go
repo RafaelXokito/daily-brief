@@ -175,7 +175,7 @@ func TestBudgetShowsPaperSplit(t *testing.T) {
 	if !strings.Contains(out, "Paper: 400k") {
 		t.Fatalf("budget output lacks the paper line:\n%s", out)
 	}
-	for _, want := range []string{"research " + paperTokens(split.Research), "editor " + paperTokens(split.Editor)} {
+	for _, want := range []string{"research " + paper.HumanTokens(split.Research), "editor " + paper.HumanTokens(split.Editor)} {
 		if !strings.Contains(out, want) {
 			t.Errorf("budget output lacks %q:\n%s", want, out)
 		}

@@ -215,8 +215,8 @@ func TestRenderColophonOvershoot(t *testing.T) {
 func TestHumanTokens(t *testing.T) {
 	tests := map[int64]string{0: "0", 950: "950", 12000: "12k", 12500: "12.5k", 412000: "412k", 2000000: "2M", 1250000: "1.2M"}
 	for n, want := range tests {
-		if got := humanTokens(n); got != want {
-			t.Errorf("humanTokens(%d) = %q, want %q", n, got, want)
+		if got := HumanTokens(n); got != want {
+			t.Errorf("HumanTokens(%d) = %q, want %q", n, got, want)
 		}
 	}
 }

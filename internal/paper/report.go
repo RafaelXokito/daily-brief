@@ -63,9 +63,9 @@ func (r Report) Line() string {
 		}
 		return fmt.Sprintf("paper %s: no tokens spent, %s", r.Date, r.notDelivered())
 	}
-	tokens := fmt.Sprintf("%s of %s tokens", humanTokens(r.Spent), humanTokens(r.Budget))
+	tokens := fmt.Sprintf("%s of %s tokens", HumanTokens(r.Spent), HumanTokens(r.Budget))
 	if r.Over > 0 {
-		tokens += fmt.Sprintf(" (over by %s)", humanTokens(r.Over))
+		tokens += fmt.Sprintf(" (over by %s)", HumanTokens(r.Over))
 	}
 	end := r.notDelivered()
 	if r.Delivered {

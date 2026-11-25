@@ -215,7 +215,7 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	x.r.Over = max(0, x.r.Spent-x.r.Budget)
 	x.r.Fallbacks = p.Fallbacks
 	if x.r.Over > 0 {
-		x.warn(fmt.Sprintf("this paper went over its token budget by %s tokens (%s of %s)", humanTokens(x.r.Over), humanTokens(x.r.Spent), humanTokens(x.r.Budget)))
+		x.warn(fmt.Sprintf("this paper went over its token budget by %s tokens (%s of %s)", HumanTokens(x.r.Over), HumanTokens(x.r.Spent), HumanTokens(x.r.Budget)))
 	}
 	var topics []string
 	for _, c := range p.Chapters {

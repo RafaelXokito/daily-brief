@@ -560,7 +560,7 @@ func TestRunOvershootReported(t *testing.T) {
 		t.Fatalf("line %q, log %q", r.Line(), e.log.String())
 	}
 	colophon := epubFile(t, e.deliver.data[0], "EPUB/colophon.xhtml")
-	if !bytes.Contains(colophon, []byte("over by "+humanTokens(r.Over))) {
+	if !bytes.Contains(colophon, []byte("over by "+HumanTokens(r.Over))) {
 		t.Fatalf("colophon does not record the overshoot: %s", colophon)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/RafaelXokito/daily-brief/internal/brief"
@@ -173,6 +172,8 @@ func (l dropboxLogin) run(ctx context.Context, cfg config.Config, in io.Reader, 
 		code, err := dropbox.Listen(ctx, l.ListenAddr, state)
 		results <- loginResult{code, err}
 	}()
+	// The stdin reader cannot be cancelled; it is left running on purpose,
+	// as the process exits right after the login.
 	go func() { results <- promptForCode(in, out, state) }()
 
 	var errs []error
@@ -229,15 +230,6 @@ func (l dropboxLogin) finish(ctx context.Context, appKey, code, verifier string,
 	return nil
 }
 
-// paperTokens formats n like the paper's report: 400000 is "400k".
-func paperTokens(n int64) string {
-	s := brief.HumanTokens(n)
-	for _, unit := range []string{"k", "M"} {
-		s = strings.Replace(s, ".0"+unit, unit, 1)
-	}
-	return s
-}
-
 // paperBudgetLines is what `daily-brief budget` adds for the paper: its
 // budget and how it splits, or nothing when paper.token_budget is unset.
 func paperBudgetLines(cfg config.Config) string {
@@ -247,8 +239,8 @@ func paperBudgetLines(cfg config.Config) string {
 	}
 	split, err := paper.SplitBudget(total, cfg)
 	if err != nil {
-		return fmt.Sprintf("Paper: %s tokens, but %v\n", paperTokens(total), err)
+		return fmt.Sprintf("Paper: %s tokens, but %v\n", paper.HumanTokens(total), err)
 	}
 	return fmt.Sprintf("Paper: %s tokens (research %s, editor %s reserved first)\n",
-		paperTokens(total), paperTokens(split.Research), paperTokens(split.Editor))
+		paper.HumanTokens(total), paper.HumanTokens(split.Research), paper.HumanTokens(split.Editor))
 }

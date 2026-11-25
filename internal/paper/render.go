@@ -114,14 +114,14 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 func colophon(p editor.Paper, m Meta) colophonView {
 	v := colophonView{
 		Title: clean(m.Title), Model: clean(m.Model), Date: p.Date.Format("Monday, 2 January 2006"),
-		Spent: humanTokens(m.Spent), Cut: strings.Join(cleanAll(m.Cut), ", "),
+		Spent: HumanTokens(m.Spent), Cut: strings.Join(cleanAll(m.Cut), ", "),
 		Issue: m.Issue, Summarised: m.Summarised, Failed: m.Failed, Fallbacks: p.Fallbacks,
 	}
 	if m.Budget > 0 {
-		v.Budget = humanTokens(m.Budget)
+		v.Budget = HumanTokens(m.Budget)
 	}
 	if m.Over > 0 {
-		v.Over = humanTokens(m.Over)
+		v.Over = HumanTokens(m.Over)
 	}
 	return v
 }
@@ -179,8 +179,8 @@ func titleCase(s string) string {
 	return strings.Join(words, " ")
 }
 
-// humanTokens is brief.HumanTokens without a trailing ".0": "12k", "12.5k".
-func humanTokens(n int64) string {
+// HumanTokens is brief.HumanTokens without a trailing ".0": "12k", "12.5k".
+func HumanTokens(n int64) string {
 	s := brief.HumanTokens(n)
 	for _, unit := range []string{"k", "M"} {
 		s = strings.Replace(s, ".0"+unit, unit, 1)
