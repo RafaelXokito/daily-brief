@@ -22,6 +22,7 @@ import (
 	"github.com/RafaelXokito/daily-brief/internal/config"
 	"github.com/RafaelXokito/daily-brief/internal/editor"
 	"github.com/RafaelXokito/daily-brief/internal/fetch"
+	"github.com/RafaelXokito/daily-brief/internal/picture"
 )
 
 const runDate = "2026-11-25"
@@ -172,12 +173,13 @@ func (f *fakeFetch) fetch(_ context.Context, urls []string) map[string]fetch.Art
 type fakePictures struct {
 	mu    sync.Mutex
 	size  int
-	same  bool           // every URL gets the same bytes, like a site's generic logo
-	sizes map[string]int // per-URL size, overriding size
+	same  bool            // every URL gets the same bytes, like a site's generic logo
+	sizes map[string]int  // per-URL size, overriding size
+	small map[string]bool // URLs whose picture is logo-like
 	urls  []string
 }
 
-func (f *fakePictures) picture(_ context.Context, url string) ([]byte, error) {
+func (f *fakePictures) picture(_ context.Context, url string) (picture.Picture, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.urls = append(f.urls, url)
@@ -186,13 +188,13 @@ func (f *fakePictures) picture(_ context.Context, url string) ([]byte, error) {
 		size = n
 	}
 	if size == 0 {
-		return nil, errors.New("no picture")
+		return picture.Picture{}, errors.New("no picture")
 	}
 	data := append([]byte{0xff, 0xd8, 0xff}, make([]byte, size-3)...)
 	if !f.same {
 		copy(data[3:], url) // distinct bytes per picture
 	}
-	return data, nil
+	return picture.Picture{Data: data, Small: f.small[url]}, nil
 }
 
 type fakeDeliverer struct {

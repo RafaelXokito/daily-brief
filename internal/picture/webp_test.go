@@ -72,7 +72,7 @@ func TestPrepareRefusesWebPFrameBombs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var before, after runtime.MemStats
 			runtime.ReadMemStats(&before)
-			_, err := Prepare(tt.data)
+			_, err := Prepare(tt.data, "")
 			runtime.ReadMemStats(&after)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
@@ -91,12 +91,12 @@ func TestPrepareDecodesAValidWebP(t *testing.T) {
 		"plain VP8L":   webpFile(vp8lFrame(30, 20)),
 		"VP8L in VP8X": webpFile(vp8x(0, 30, 20), riffChunk("ICCP", make([]byte, 3)), vp8lFrame(30, 20)),
 	} {
-		out, err := Prepare(data)
+		out, err := Prepare(data, "")
 		if err != nil {
 			t.Errorf("%s: %v", name, err)
 			continue
 		}
-		if b := decodeJPEG(t, out).Bounds(); b.Dx() != 30 || b.Dy() != 20 {
+		if b := decodeJPEG(t, out.Data).Bounds(); b.Dx() != 30 || b.Dy() != 20 {
 			t.Errorf("%s: size %v, want 30x20", name, b)
 		}
 	}

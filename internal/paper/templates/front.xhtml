@@ -4,7 +4,7 @@
 <p class="fl">❦</p>
 {{range $i, $l := .Leads}}{{if $i}}<p class="sep">⁂</p>
 {{end}}<h2 class="story">{{template "link" $l}}</h2>
-{{if .Image}}<img class="{{if $i}}lead-pic{{else}}lead-main{{end}}" src="{{.Image}}" alt="{{.Text}}"/>
+{{if .Image}}<img class="{{if .Small}}small-pic{{else if $i}}lead-pic{{else}}lead-main{{end}}" src="{{.Image}}" alt="{{.Text}}"/>
 {{end}}{{if .Act}}<p class="tag act">Act now</p>
 {{end}}{{if .Standfirst}}<p class="standfirst">{{.Standfirst}}</p>
 {{end}}{{range .Paragraphs}}<p>{{.}}</p>

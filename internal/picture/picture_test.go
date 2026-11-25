@@ -52,14 +52,14 @@ func decodeJPEG(t *testing.T, data []byte) image.Image {
 }
 
 func TestPrepareScalesAndCompresses(t *testing.T) {
-	out, err := Prepare(encodePNG(t, scene(2400, 1600)))
+	out, err := Prepare(encodePNG(t, scene(2400, 1600)), "")
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if len(out) > MaxBytes {
-		t.Errorf("output %d bytes, want at most %d", len(out), MaxBytes)
+	if len(out.Data) > MaxBytes {
+		t.Errorf("output %d bytes, want at most %d", len(out.Data), MaxBytes)
 	}
-	b := decodeJPEG(t, out).Bounds()
+	b := decodeJPEG(t, out.Data).Bounds()
 	if b.Dx() != 800 {
 		t.Errorf("width %d, want 800", b.Dx())
 	}
@@ -69,12 +69,12 @@ func TestPrepareScalesAndCompresses(t *testing.T) {
 }
 
 func TestPrepareNeverUpscales(t *testing.T) {
-	out, err := Prepare(encodePNG(t, scene(300, 200)))
+	out, err := Prepare(encodePNG(t, scene(600, 400)), "")
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if b := decodeJPEG(t, out).Bounds(); b.Dx() != 300 || b.Dy() != 200 {
-		t.Errorf("size %dx%d, want 300x200", b.Dx(), b.Dy())
+	if b := decodeJPEG(t, out.Data).Bounds(); b.Dx() != 600 || b.Dy() != 400 {
+		t.Errorf("size %dx%d, want 600x400", b.Dx(), b.Dy())
 	}
 }
 
@@ -88,23 +88,23 @@ func TestPrepareFormats(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, data := range map[string][]byte{"jpeg": j.Bytes(), "gif": g.Bytes(), "png": encodePNG(t, src)} {
-		out, err := Prepare(data)
+		out, err := Prepare(data, "")
 		if err != nil {
 			t.Errorf("%s: %v", name, err)
 			continue
 		}
-		if b := decodeJPEG(t, out).Bounds(); b.Dx() != 120 {
+		if b := decodeJPEG(t, out.Data).Bounds(); b.Dx() != 120 {
 			t.Errorf("%s: width %d", name, b.Dx())
 		}
 	}
 }
 
 func TestPrepareFlattensTransparencyOnWhite(t *testing.T) {
-	out, err := Prepare(encodePNG(t, image.NewNRGBA(image.Rect(0, 0, 40, 40))))
+	out, err := Prepare(encodePNG(t, image.NewNRGBA(image.Rect(0, 0, 40, 40))), "")
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	r, g, b, _ := decodeJPEG(t, out).At(20, 20).RGBA()
+	r, g, b, _ := decodeJPEG(t, out.Data).At(20, 20).RGBA()
 	if r>>8 < 240 || g>>8 < 240 || b>>8 < 240 {
 		t.Errorf("transparent pixel became (%d,%d,%d), want white", r>>8, g>>8, b>>8)
 	}
@@ -112,7 +112,7 @@ func TestPrepareFlattensTransparencyOnWhite(t *testing.T) {
 
 func TestPrepareRefusesGarbage(t *testing.T) {
 	for _, data := range [][]byte{nil, []byte("not an image"), []byte("<svg xmlns='http://www.w3.org/2000/svg'/>")} {
-		if _, err := Prepare(data); err == nil {
+		if _, err := Prepare(data, ""); err == nil {
 			t.Errorf("Prepare(%q) accepted", data)
 		}
 	}
@@ -161,7 +161,7 @@ func TestPrepareRefusesHugeDimensions(t *testing.T) {
 			var before, after runtime.MemStats
 			runtime.ReadMemStats(&before)
 			start := time.Now()
-			_, err := Prepare(data)
+			_, err := Prepare(data, "")
 			elapsed := time.Since(start)
 			runtime.ReadMemStats(&after)
 			if err == nil {
@@ -180,7 +180,7 @@ func TestPrepareRefusesHugeDimensions(t *testing.T) {
 func TestPrepareAcceptsAtTheCap(t *testing.T) {
 	// 8000x10 is within every cap; the refusal must not be off by one.
 	img := image.NewGray(image.Rect(0, 0, 8000, 10))
-	if _, err := Prepare(encodePNG(t, img)); err != nil {
+	if _, err := Prepare(encodePNG(t, img), ""); err != nil {
 		t.Errorf("Prepare refused an 8000x10 picture: %v", err)
 	}
 }
@@ -193,7 +193,7 @@ func TestPrepareGivesUpWhenItCannotShrink(t *testing.T) {
 		seed = seed*1664525 + 1013904223
 		img.Pix[i] = uint8(seed >> 24)
 	}
-	if _, err := Prepare(encodePNG(t, img)); err == nil {
+	if _, err := Prepare(encodePNG(t, img), ""); err == nil {
 		t.Error("Prepare returned a picture over the byte cap")
 	}
 }
@@ -218,7 +218,7 @@ func TestPrepareDecodesOneAtATime(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := Prepare(data); err != nil {
+			if _, err := Prepare(data, ""); err != nil {
 				t.Error(err)
 			}
 		}()

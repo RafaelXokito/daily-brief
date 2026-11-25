@@ -31,6 +31,7 @@ h2.brief-topic { font-family: "Fell", serif; font-style: italic; font-weight: no
 .brief a { color: #2a2318; text-decoration: none; }
 img.lead-main { display: block; width: 100%; height: auto; margin: 0.4em 0 0.6em 0; }
 img.lead-pic { float: right; width: 45%; height: auto; margin: 0.2em 0 0.4em 0.8em; }
+img.small-pic { float: right; width: 22%; height: auto; margin: 0.2em 0 0.4em 0.8em; }
 .sep, h2.tier { clear: both; }
 .sep { text-align: center; color: #2f5a3a; margin: 1em 0; }
 .center { text-align: center; }

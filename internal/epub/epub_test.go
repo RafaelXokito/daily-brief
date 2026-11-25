@@ -94,7 +94,8 @@ func TestBuildLayout(t *testing.T) {
 	}
 	css := string(files["EPUB/paper.css"])
 	for _, want := range []string{"fonts/IMFeENrm28P.ttf", "fonts/UnifrakturMaguntia-Book.ttf", "#2f5a3a", "#8a1c1c",
-		"mark.key { background-color: #ecd9a0; color: inherit; padding: 0 0.1em; }", "img.story-pic { width: 60%;"} {
+		"mark.key { background-color: #ecd9a0; color: inherit; padding: 0 0.1em; }", "img.story-pic { width: 60%;",
+		"img.small-pic { float: right; width: 22%;"} {
 		if !strings.Contains(css, want) {
 			t.Errorf("paper.css lacks %q", want)
 		}

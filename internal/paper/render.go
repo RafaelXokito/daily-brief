@@ -40,11 +40,11 @@ var ordinals = []string{"First", "Second", "Third", "Fourth", "Fifth", "Sixth",
 
 // frontEntry is a lead or an In Brief sentence. A lead also carries its
 // story's standfirst, the title of the chapter it continues in and its
-// picture, "img/<name>" or "".
+// picture, "img/<name>" or "", Small when the picture prints small.
 type frontEntry struct {
 	Href, Text, Standfirst, Continued, Image string
 	Paragraphs                               []string
-	Act                                      bool
+	Act, Small                               bool
 }
 
 // frontGroup is a topic's In Brief paragraph under its title, "Of
@@ -65,7 +65,7 @@ type placed struct {
 // storyView is a story ready for the template. A lead's first paragraph,
 // when it starts with a letter or digit, is split into DropCap and
 // DropRest and left out of Paragraphs. URL is the source link, "" unless
-// http(s).
+// http(s). Small means Image or Pic prints small (a logo).
 type storyView struct {
 	ID, Headline, Standfirst, Dateline, Host, URL string
 	DropCap                                       string
@@ -73,7 +73,7 @@ type storyView struct {
 	Image                                         string // the lead's picture, "img/chN.jpg", or ""
 	Pic                                           string // the picture of a story that needs one, "img/chN-K.jpg", or ""
 	Paragraphs                                    [][]segment
-	Act                                           bool
+	Act, Small                                    bool
 }
 
 type chapterView struct {
@@ -107,7 +107,7 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 			sv := storyView{
 				ID: reg.add(s.ID, file), Headline: clean(s.Headline), Standfirst: clean(s.Standfirst),
 				Dateline: clean(s.Dateline), Host: clean(s.Host), URL: sourceURL(s.URL), Paragraphs: paragraphViews(s.Paragraphs, s.Highlights),
-				Act: s.Tag == "ACT",
+				Act: s.Tag == "ACT", Small: s.SmallImage,
 			}
 			if _, seen := stories[s.ID]; !seen {
 				stories[s.ID] = placed{chapter: n - 1, title: title, lead: sv.Standfirst, act: sv.Act}
@@ -153,7 +153,7 @@ func frontView(fp editor.FrontPage, reg ids, stories map[string]placed, chapters
 		e := frontEntry{Href: reg.href[l.ID], Text: clean(l.Headline), Standfirst: s.lead,
 			Continued: s.title, Paragraphs: cleanAll(l.Paragraphs), Act: s.act}
 		if l.Image != "" {
-			e.Image = "img/" + l.Image
+			e.Image, e.Small = "img/"+l.Image, l.SmallImage
 		}
 		v.Leads = append(v.Leads, e)
 	}

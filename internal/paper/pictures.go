@@ -9,6 +9,7 @@ import (
 	"github.com/RafaelXokito/daily-brief/internal/editor"
 	"github.com/RafaelXokito/daily-brief/internal/epub"
 	"github.com/RafaelXokito/daily-brief/internal/fetch"
+	"github.com/RafaelXokito/daily-brief/internal/picture"
 )
 
 const (
@@ -102,8 +103,8 @@ func chapterPictureJobs(p editor.Paper, images map[string]string) (map[string]pi
 // maxPictureBytes; that one and the rest are left out. A picture that
 // fails, or whose bytes repeat one already kept (a site's generic logo),
 // is skipped. It returns a copy of p with the kept pictures' stories and
-// front leads given their Image, the pictures, and how many stories had a
-// preview image.
+// front leads given their Image (and SmallImage for a logo-like one), the
+// pictures, and how many stories had a preview image.
 func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, []epub.Image, int) {
 	jobs := pictureJobs(p, images)
 	if len(jobs) == 0 {
@@ -117,7 +118,8 @@ func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, 
 	total := 0
 	kept := map[[sha256.Size]byte]bool{}
 	for _, j := range jobs {
-		d := data[j.url]
+		pic := data[j.url]
+		d := pic.Data
 		if len(d) == 0 {
 			continue
 		}
@@ -130,29 +132,29 @@ func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, 
 		}
 		kept[sum] = true
 		total += len(d)
-		showPicture(&out, j)
+		showPicture(&out, j, pic.Small)
 		pics = append(pics, epub.Image{Name: j.name, Data: d})
 	}
 	return out, pics, len(jobs)
 }
 
-// showPicture sets j's picture on its story and front lead in p, whose
-// Chapters and Front.Leads are already copies; a story list is copied
-// before it changes.
-func showPicture(p *editor.Paper, j pictureJob) {
+// showPicture sets j's picture, small or not, on its story and front lead
+// in p, whose Chapters and Front.Leads are already copies; a story list is
+// copied before it changes.
+func showPicture(p *editor.Paper, j pictureJob, small bool) {
 	if j.chapter >= 0 {
 		stories := slices.Clone(p.Chapters[j.chapter].Stories)
-		stories[j.story].Image = j.name
+		stories[j.story].Image, stories[j.story].SmallImage = j.name, small
 		p.Chapters[j.chapter].Stories = stories
 	}
 	if j.front >= 0 {
-		p.Front.Leads[j.front].Image = j.name
+		p.Front.Leads[j.front].Image, p.Front.Leads[j.front].SmallImage = j.name, small
 	}
 }
 
 // downloadPictures fetches each distinct preview image of jobs once and
 // returns the prepared pictures by URL; failures are absent.
-func (x *run) downloadPictures(jobs []pictureJob) map[string][]byte {
+func (x *run) downloadPictures(jobs []pictureJob) map[string]picture.Picture {
 	var urls []string
 	for _, j := range jobs {
 		if !slices.Contains(urls, j.url) {
@@ -161,7 +163,7 @@ func (x *run) downloadPictures(jobs []pictureJob) map[string][]byte {
 	}
 	x.logf("fetching %d pictures", len(urls))
 	var mu sync.Mutex
-	out := map[string][]byte{}
+	out := map[string]picture.Picture{}
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, fetch.DefaultConcurrency)
 	for _, u := range urls {
@@ -170,9 +172,9 @@ func (x *run) downloadPictures(jobs []pictureJob) map[string][]byte {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if data, err := x.d.Picture(x.ctx, u); err == nil {
+			if pic, err := x.d.Picture(x.ctx, u); err == nil {
 				mu.Lock()
-				out[u] = data
+				out[u] = pic
 				mu.Unlock()
 			}
 		}()

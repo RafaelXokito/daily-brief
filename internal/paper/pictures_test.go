@@ -93,6 +93,58 @@ func TestPicturesNamesAndPlaces(t *testing.T) {
 	}
 }
 
+// A logo-like picture is marked small on every story and front lead that
+// shows it; the others are not.
+func TestPicturesCarrySmall(t *testing.T) {
+	f := &fakePictures{size: 10_000, small: map[string]bool{
+		"https://example.com/t0i0.jpg": true, // front lead one and chapter one's lead
+		"https://example.com/t1i2.jpg": true, // a story that needs a picture
+	}}
+	p, _, _ := pictureRun(f).pictures(picturePaper(), previews(picturePaper()))
+	got := map[string]bool{"front:t0i0": p.Front.Leads[0].SmallImage, "front:t1i1": p.Front.Leads[1].SmallImage}
+	for _, c := range p.Chapters {
+		for _, s := range c.Stories {
+			got[s.ID] = s.SmallImage
+		}
+	}
+	want := map[string]bool{"front:t0i0": true, "front:t1i1": false,
+		"t0i0": true, "t0i1": false, "t1i0": false, "t1i1": false, "t1i2": true}
+	if !maps.Equal(got, want) {
+		t.Errorf("small %v, want %v", got, want)
+	}
+}
+
+// End to end: a logo-like lead picture prints small on the front page,
+// even as the main picture, and in its chapter.
+func TestRunSmallPicture(t *testing.T) {
+	e := newRunEnv(t)
+	e.picture.size = 20_000
+	e.picture.small = map[string]bool{"https://example.com/alpha/a.jpg": true}
+	r, err := e.run(Options{NoDeliver: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := os.ReadFile(r.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := string(epubFile(t, book, "EPUB/front.xhtml"))
+	for _, want := range []string{`<img class="small-pic" src="img/ch1.jpg"`, `<img class="lead-pic" src="img/ch2.jpg"`} {
+		if !strings.Contains(front, want) {
+			t.Errorf("front page lacks %s\n%s", want, front)
+		}
+	}
+	if strings.Contains(front, "lead-main") {
+		t.Errorf("the logo is the front page's main picture\n%s", front)
+	}
+	if ch1 := string(epubFile(t, book, "EPUB/ch1.xhtml")); !strings.Contains(ch1, `<img class="small-pic" src="img/ch1.jpg" alt="Edited story"/>`) {
+		t.Errorf("chapter one lacks the small lead picture\n%s", ch1)
+	}
+	if ch2 := string(epubFile(t, book, "EPUB/ch2.xhtml")); !strings.Contains(ch2, `<p class="pic"><img src="img/ch2.jpg" alt="Edited story"/></p>`) {
+		t.Errorf("chapter two's photo is not printed large\n%s", ch2)
+	}
+}
+
 // Review Focus 3: a front lead whose story has a chapter picture uses the
 // same file, fetched once, and the book does not grow.
 func TestRunFrontLeadReusesChapterPicture(t *testing.T) {

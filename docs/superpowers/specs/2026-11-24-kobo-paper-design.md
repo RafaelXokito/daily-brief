@@ -335,3 +335,12 @@ Approved by Rafael after reading the second edition.
 - **In Brief topic titles** use the chapter-opener style: a larger italic "Of <Topic>" with a small fleuron, not small caps.
 - **Pictures where the text needs them.** The chapter pass may mark a story `needs_picture` when an image helps understanding (a device, a map, a spacecraft, a route, a chart). Such stories get their article's preview picture in the chapter. At most 6 such extra pictures per book. Priority when the budget runs out: front leads, chapter leads, then `needs_picture` stories in chapter order. The per-book picture cap rises from 1 MB to 1.5 MB.
 - **Highlights.** The chapter pass may mark at most two short phrases per story (each at most 12 words) as highlights, written as `==phrase==` inside a paragraph. They render as `<mark class="key">` with a soft muted ochre background. Marks are stripped before fact checks; malformed, nested, over-long or excess marks are dropped and the plain text kept. Fallback stories have none. No highlights on the front page.
+
+## Revision 2026-11-25 (third): logos small, highlights the Kobo shows
+
+Asked by Rafael after reading the edition on the Kobo Libra Colour.
+
+- **Logos small.** Many preview images are only the site's logo.
+  A picture is logo-like when its URL path names it (logo, icon, favicon, brand, avatar, placeholder or default, as whole words; the host and query are not read), when the original is under 400 px wide or under 300 px tall, or when its four most common colours (4 bits per channel, on a 64 by 64 sample) cover 95% of it.
+  A mostly plain background alone is not enough, since a device photographed on white has one.
+  Such a picture is scaled to at most 240 px wide and prints at 22% of the width, floated right, wherever it appears: front leads (the main picture too), chapter leads and stories that need a picture.

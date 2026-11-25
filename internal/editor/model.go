@@ -42,6 +42,9 @@ type Story struct {
 	// "ch1.jpg" or "ch1-2.jpg", or "". paper.Run sets it on chapter leads and
 	// on stories that need a picture; the model never does.
 	Image string
+	// SmallImage means Image looks like a site's logo rather than a photo
+	// of the story (picture.Picture.Small): it prints small. paper.Run sets it.
+	SmallImage bool
 	// NeedsPicture is the editor's judgement that a picture helps the reader
 	// understand the story (a device, a place, a route, a chart).
 	NeedsPicture bool
@@ -68,6 +71,9 @@ type FrontLead struct {
 	// Image is the book-internal file name of the lead's picture, or "".
 	// paper.Run sets it; the model never does.
 	Image string
+	// SmallImage means Image looks like a logo: it prints small, even for
+	// the first lead. paper.Run sets it.
+	SmallImage bool
 }
 
 // BriefSentence is one sentence of an In Brief paragraph, about the story ID.

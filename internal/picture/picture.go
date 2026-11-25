@@ -1,6 +1,7 @@
 // Package picture turns an untrusted downloaded image into a small JPEG
 // for the paper: checked for size before decoding, scaled down to the
-// page's width and compressed under a byte cap.
+// page's width (or to a thumbnail's for a logo) and compressed under a
+// byte cap.
 package picture
 
 import (
@@ -23,6 +24,8 @@ import (
 const (
 	// MaxWidth is the widest picture Prepare returns, in pixels.
 	MaxWidth = 800
+	// SmallWidth is the widest small (logo-like) picture Prepare returns.
+	SmallWidth = 240
 	// MaxBytes is the largest JPEG Prepare returns.
 	MaxBytes = 90_000
 
@@ -49,32 +52,50 @@ var decodeMu sync.Mutex
 // decode is image.Decode; tests replace it to watch the serialisation.
 var decode = image.Decode
 
-// Prepare decodes a JPEG, PNG, GIF or WebP image and returns it as a
-// JPEG at most MaxWidth pixels wide and MaxBytes long, transparency
-// flattened on white. The header is checked before the image is decoded:
-// sides over 8000 pixels or over 40 megapixels are refused, and for WebP
-// every frame header too (it must match the canvas; animation is refused).
-// Concurrent calls decode one at a time.
-func Prepare(data []byte) ([]byte, error) {
+// Picture is a prepared JPEG. Small means the source looked like a logo
+// or a stand-in (see logoLike): it is at most SmallWidth wide and the
+// paper prints it small.
+type Picture struct {
+	Data  []byte
+	Small bool
+}
+
+// Prepare decodes a JPEG, PNG, GIF or WebP image downloaded from rawURL
+// and returns it as a JPEG at most MaxWidth pixels wide (SmallWidth when
+// Small) and MaxBytes long, transparency flattened on white. The header
+// is checked before the image is decoded: sides over 8000 pixels or over
+// 40 megapixels are refused, and for WebP every frame header too (it must
+// match the canvas; animation is refused). Concurrent calls decode one at
+// a time.
+func Prepare(data []byte, rawURL string) (Picture, error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("picture: %w", err)
+		return Picture{}, fmt.Errorf("picture: %w", err)
 	}
 	if err := checkSize(cfg.Width, cfg.Height); err != nil {
-		return nil, err
+		return Picture{}, err
 	}
 	if format == "webp" {
 		if err := checkWebP(data); err != nil {
-			return nil, err
+			return Picture{}, err
 		}
 	}
 	decodeMu.Lock()
 	defer decodeMu.Unlock()
 	src, _, err := decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("picture: %w", err)
+		return Picture{}, fmt.Errorf("picture: %w", err)
 	}
-	return compress(scale(src))
+	small := logoLike(rawURL, src)
+	width := MaxWidth
+	if small {
+		width = SmallWidth
+	}
+	out, err := compress(scale(src, width))
+	if err != nil {
+		return Picture{}, err
+	}
+	return Picture{Data: out, Small: small}, nil
 }
 
 func checkSize(w, h int) error {
@@ -84,14 +105,14 @@ func checkSize(w, h int) error {
 	return nil
 }
 
-// scale returns src on a white canvas, scaled to MaxWidth when wider and
+// scale returns src on a white canvas, scaled to width when wider and
 // keeping its aspect; it never enlarges.
-func scale(src image.Image) *image.RGBA {
+func scale(src image.Image, width int) *image.RGBA {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
-	if w > MaxWidth {
-		h = max(1, (h*MaxWidth+w/2)/w)
-		w = MaxWidth
+	if w > width {
+		h = max(1, (h*width+w/2)/w)
+		w = width
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.Gray{Y: backgroundGrey}), image.Point{}, draw.Src)

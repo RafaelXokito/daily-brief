@@ -420,6 +420,45 @@ func TestRenderFrontLeadPictures(t *testing.T) {
 	assertXML(t, "front", front)
 }
 
+// A small (logo-like) picture prints floated at a fifth of the width
+// wherever it appears: as the front page's main picture, as another
+// front lead's, as a chapter lead's and as a story's that needs one.
+func TestRenderSmallPictures(t *testing.T) {
+	p := samplePaper()
+	p.Front.Leads[0].Image, p.Front.Leads[0].SmallImage = "ch1.jpg", true
+	p.Front.Leads[1].Image, p.Front.Leads[1].SmallImage = "ch2.jpg", true
+	lead := &p.Chapters[0].Stories[0]
+	lead.Image, lead.SmallImage = "ch1.jpg", true
+	s := &p.Chapters[0].Stories[1]
+	s.NeedsPicture, s.Image, s.SmallImage = true, "ch1-1.jpg", true
+	chs := Render(p, sampleMeta())
+	front, ch1 := chs[0].Body, chs[1].Body
+	for _, want := range []string{
+		`<img class="small-pic" src="img/ch1.jpg" alt="Framework ships a quieter release"/>`,
+		`<img class="small-pic" src="img/ch2.jpg" alt="Patch the gateway today"/>`,
+	} {
+		if !strings.Contains(front, want) {
+			t.Errorf("front page lacks %s\n%s", want, front)
+		}
+	}
+	if strings.Contains(front, "lead-main") || strings.Contains(front, "lead-pic") {
+		t.Errorf("a small picture printed large on the front page\n%s", front)
+	}
+	for _, want := range []string{
+		`<img class="small-pic" src="img/ch1.jpg" alt="Framework ships a quieter release"/>`,
+		`<img class="small-pic" src="img/ch1-1.jpg" alt="Build tool gains a faster cache"/>`,
+	} {
+		if !strings.Contains(ch1, want) {
+			t.Errorf("chapter one lacks %s\n%s", want, ch1)
+		}
+	}
+	if strings.Contains(ch1, `class="pic"`) || strings.Contains(ch1, "story-pic") {
+		t.Errorf("a small picture printed large in chapter one\n%s", ch1)
+	}
+	assertXML(t, "front", front)
+	assertXML(t, "ch1.xhtml", ch1)
+}
+
 // Review Focus 5: no lead with a picture leaves no picture element, empty
 // wrapper or picture class behind.
 func TestRenderFrontLeadsWithoutPictures(t *testing.T) {
