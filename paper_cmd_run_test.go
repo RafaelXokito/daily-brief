@@ -108,11 +108,20 @@ func TestPaperCommandPrintsSummaryWhenNoStoriesAfterResearch(t *testing.T) {
 	}
 }
 
-// runMain runs the program's run() with args as its command line.
+// runMain runs the program's run() with args as its command line and its
+// output discarded.
 func runMain(t *testing.T, args ...string) error {
 	t.Helper()
-	oldArgs, oldFlags := os.Args, flag.CommandLine
-	t.Cleanup(func() { os.Args, flag.CommandLine = oldArgs, oldFlags })
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldArgs, oldFlags, oldOut, oldErr := os.Args, flag.CommandLine, os.Stdout, os.Stderr
+	t.Cleanup(func() {
+		os.Args, flag.CommandLine, os.Stdout, os.Stderr = oldArgs, oldFlags, oldOut, oldErr
+		null.Close()
+	})
+	os.Stdout, os.Stderr = null, null
 	os.Args = append([]string{"daily-brief"}, args...)
 	flag.CommandLine = flag.NewFlagSet("daily-brief", flag.ContinueOnError)
 	return run()
