@@ -260,7 +260,7 @@ func (g *Generator) need(cal *calibration, i int, prior string) int64 {
 // overshoot (default 10). It affects claude-code only: the API backend
 // enforces its allocation per request.
 func (g *Generator) WithMarginPercent(pct int) *Generator {
-	g.marginPercent = pct
+	g.marginPercent = max(pct, 0)
 	return g
 }
 

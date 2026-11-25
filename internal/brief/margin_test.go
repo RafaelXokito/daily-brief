@@ -1,6 +1,7 @@
 package brief
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/RafaelXokito/daily-brief/internal/config"
@@ -45,34 +46,80 @@ func TestMarginPercent(t *testing.T) {
 }
 
 func TestDefaultMarginUnchanged(t *testing.T) {
-	cfg := config.Config{Provider: config.Provider{Type: "claude-code"}, TokenBudget: 500_000}
-	g := NewGenerator(cfg, &fakeBackend{})
-	for _, alloc := range []int64{0, 1, 99_999, 250_000} {
-		for _, search := range []bool{false, true} {
-			if got, want := g.margin(alloc, search), margin("claude-code", alloc, search); got != want {
-				t.Errorf("margin(%d,%v) = %d, want %d", alloc, search, got, want)
-			}
-		}
+	// Literals from the code before the margin became configurable.
+	if got := margin("claude-code", 99_999, false); got != 9_999 {
+		t.Errorf("margin = %d, want 9999", got)
 	}
-	if got, want := g.spendable(333_333, 2, true), spendable("claude-code", 333_333, 2, true); got != want {
+	if got := margin("claude-code", 99_999, true); got != 9_999+ccSearchCost {
+		t.Errorf("margin with search = %d", got)
+	}
+	if got, want := spendable("claude-code", 333_333, 2, true), int64((333_333-2*ccSearchCost)*10/11); got != want || got != 221_211 {
 		t.Errorf("spendable = %d, want %d", got, want)
+	}
+	if got := spendable("claude-code", 333_333, 2, false); got != 303_030 {
+		t.Errorf("spendable no search = %d, want 303030", got)
+	}
+
+	// Pass budgets planned by the pre-change code (commit 7ddfc72) for this run.
+	cfg := testConfig("claude-code", 0, "A", "B", "C")
+	cfg.TokenBudget = 600_000
+	cfg.Concurrency = 1
+	f := &fakeBackend{spend: spendFraction(0.6)}
+	runFake(cfg, f)
+	var got []int64
+	for _, task := range f.tasks {
+		got = append(got, task.Budget)
+	}
+	// Sorted: the order of the narrow passes is not deterministic.
+	slices.Sort(got)
+	want := []int64{19085, 19085, 30171, 60354, 132779, 163636, 200826, 292112}
+	if !slices.Equal(got, want) {
+		t.Errorf("pass budgets = %v, want %v", got, want)
+	}
+
+	g := NewGenerator(cfg, &fakeBackend{})
+	if g.marginPercent != 10 {
+		t.Errorf("default marginPercent = %d", g.marginPercent)
 	}
 	if got := g.WithMarginPercent(30).margin(100_000, false); got != 30_000 {
 		t.Errorf("WithMarginPercent(30) margin = %d", got)
 	}
 }
 
-func TestMaxItemsAndEstimateTokens(t *testing.T) {
+func TestWithMarginPercentClampsNegative(t *testing.T) {
+	cfg := testConfig("claude-code", 0, "A")
+	for _, pct := range []int{0, -50, -100, -1000} {
+		g := NewGenerator(cfg, &fakeBackend{}).WithMarginPercent(pct)
+		if g.marginPercent != 0 {
+			t.Errorf("pct %d: marginPercent = %d, want 0", pct, g.marginPercent)
+		}
+		if got := g.margin(100_000, false); got != 0 {
+			t.Errorf("pct %d: margin = %d, want 0", pct, got)
+		}
+		if got := g.spendable(100_000, 1, false); got != 100_000 {
+			t.Errorf("pct %d: spendable = %d, want 100000", pct, got)
+		}
+	}
+}
+
+func TestMaxItems(t *testing.T) {
 	cfg := config.Config{Provider: config.Provider{Type: "claude-code"}, TokenBudget: 500_000, MaxReadMinutes: 10,
 		Topics: []config.Topic{{Name: "a"}, {Name: "b"}}}
-	want := 0
-	for _, c := range itemCaps(cfg) {
-		want += c
+	base := MaxItems(cfg)
+	if base != 20 {
+		t.Errorf("MaxItems = %d, want 20", base)
 	}
-	if got := MaxItems(cfg); got != want || got == 0 {
-		t.Errorf("MaxItems = %d, want %d", got, want)
+	cfg.General = true
+	if got := MaxItems(cfg); got != 30 {
+		t.Errorf("MaxItems with general = %d, want 30", got)
 	}
-	if EstimateTokens("hello") != estimateTokens("hello") {
-		t.Error("EstimateTokens differs")
+	if n := len(itemCaps(cfg)); n != 3 {
+		t.Errorf("general adds the World topic: %d caps, want 3", n)
+	}
+}
+
+func TestEstimateTokens(t *testing.T) {
+	if got := EstimateTokens("hello"); got != 3 {
+		t.Errorf("EstimateTokens = %d, want 3", got)
 	}
 }
