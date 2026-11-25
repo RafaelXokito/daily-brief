@@ -69,6 +69,21 @@ Useful flags:
 Flags work before or after a subcommand, so `daily-brief budget -topics AI`
 works too. `daily-brief -h` lists everything.
 
+## Kobo paper
+
+`daily-brief paper` can also write each day's journal as an EPUB "paper" and
+deliver it to a Kobo e-reader through Dropbox, unattended, for example from
+a home server timer.
+
+```sh
+daily-brief paper -no-deliver   # build today's paper locally, nothing is sent
+daily-brief dropbox login       # connect Dropbox, then run daily-brief paper
+```
+
+It needs a positive `paper.token_budget` in the config. The Dropbox app,
+config, server timer and exit codes are in
+[docs/GUIDE.md](docs/GUIDE.md#the-kobo-paper).
+
 ## Keys
 
 | Key | Action |

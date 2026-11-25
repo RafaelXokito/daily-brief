@@ -708,3 +708,187 @@ topics, and what all of today's runs spent, e.g. `190.9k / 200.0k tokens
 (95%), 190.9k on failed topics · 645.9k today in 2 runs`, followed by
 `· 30.0k over earlier today` if an earlier run went over its budget. A journal saved
 before `runs` existed counts as one run.
+
+## The Kobo paper
+
+`daily-brief paper` turns the day's journal into a book for a Kobo e-reader and delivers it through Dropbox.
+It is meant to run unattended every morning on a home server.
+Nothing about the TUI changes for people who never use it.
+
+Each morning the command researches your topics, fetches the source articles, writes the paper with an editor pass, builds an EPUB and uploads it to the Kobo's Dropbox folder.
+The book has a cover, a front page ("The Day in Brief"), one chapter per topic and a colophon, and each chapter is an entry in the Kobo's table of contents.
+Where a source article could be fetched, the story is a long summary of it, so the paper reads well offline without carrying whole articles.
+Stories without a usable source are written from the research digest alone.
+Only today's paper stays on the Kobo: after a successful upload, older editions that daily-brief created are deleted from Dropbox, and the Kobo drops them on its next sync.
+
+The server keeps its own config, topics and journals, separate from your laptop's.
+
+### Config
+
+The paper has its own block in `config.yaml`:
+
+```yaml
+paper:
+  token_budget: 400000   # tokens per edition, required, must be positive
+  title: The Daily Brief # optional, this is the default
+  dropbox:
+    app_key: <your Dropbox app key>   # not a secret
+    folder: /Apps/Rakuten Kobo        # optional, this is the default
+```
+
+`daily-brief paper` refuses to run unless the budget is a positive number, and `0` (auto) is refused.
+`-budget` overrides `paper.token_budget` for one run and must also be positive.
+`daily-brief budget` shows what `paper.token_budget` buys: the research, overview and editor shares.
+The title is used in the file name, so it cannot contain a slash or control characters.
+The folder must be an absolute Dropbox path.
+
+The Dropbox refresh token is never stored in `config.yaml`.
+
+### Creating the Dropbox app
+
+The Kobo downloads from the `Apps/Rakuten Kobo` folder in Dropbox, which belongs to Kobo's own Dropbox app.
+daily-brief needs its own Dropbox app with Full Dropbox access to put a book there.
+An "App folder" app cannot reach it.
+
+1. Open [dropbox.com/developers/apps](https://www.dropbox.com/developers/apps) and press Create app.
+2. Choose Scoped access, then Full Dropbox, and give the app a name.
+3. On the Permissions tab tick `files.metadata.read`, `files.content.read` and `files.content.write`, then press Submit.
+   Tick nothing else, and in particular no team scopes.
+4. On the Settings tab add the redirect URI `http://localhost:53682/`.
+5. Copy the app key from the Settings tab into `paper.dropbox.app_key`.
+
+Three traps, all met while setting this up:
+
+- **Team scopes.**
+  If the app has any team scope (`team_data.member`, `team_data.governance.*`), Dropbox says "Please sign in with a work account".
+  Remove them so the app has only the three file scopes above.
+- **Sign in with Apple.**
+  It can loop forever on Dropbox's app approval page, in every browser.
+  Set a Dropbox password at [dropbox.com/forgot](https://www.dropbox.com/forgot) and sign in with your email and password instead.
+- **The redirect page.**
+  After you approve the app, Dropbox redirects to `http://localhost:53682/`.
+  When the login runs on a different machine from your browser, that page may say it cannot connect.
+  That is expected: copy the full URL from the address bar and paste it into the prompt that `daily-brief dropbox login` shows.
+
+### Logging in and checking
+
+```sh
+daily-brief dropbox login     # connect Dropbox for paper delivery
+daily-brief dropbox status    # check the connection (read-only)
+```
+
+`dropbox login` needs `paper.dropbox.app_key` in the config.
+It prints an authorisation URL.
+Open it, approve the app, and either let the browser reach `http://localhost:53682/` or paste the redirect URL back at the prompt, whichever comes first.
+It stores a refresh token in `~/.config/daily-brief/dropbox.token` (mode 0600, and daily-brief refuses to use it if group or others can read it).
+It never stores your password.
+It also prints the `systemd-creds encrypt` command to move the token into an encrypted credential on a server (see below).
+
+`dropbox status` refreshes an access token and lists the folder.
+It prints the number of files and how many of them are daily-brief editions.
+It changes nothing.
+
+The token is read from the systemd credential `dropbox_refresh_token` (`$CREDENTIALS_DIRECTORY`) when there is one, and otherwise from the file above.
+
+### Reading it on the Kobo
+
+The Kobo picks the book up on its next Dropbox sync.
+The paper embeds its own fonts (IM Fell English and UnifrakturMaguntia, SIL Open Font License), but the Kobo only shows embedded fonts when the reading font is set to "Publisher Default".
+While reading, open the Aa menu and choose Publisher Default for the font.
+
+### Budget and overshoot
+
+The paper's budget covers everything the run spends: research, the overview and the editor pass.
+The editor's share is reserved before research starts, so research can never eat it.
+A pass starts only if its planned cost plus a safety margin fits in what is left.
+
+The `claude-code` provider cannot stop a pass part-way: the Claude Code CLI has no token limit, and its cache reads count as full tokens in daily-brief's accounting while costing about a tenth in dollars.
+So on `claude-code` the paper keeps a wide margin, 30% (`paper.MarginPercent`), to stay under the budget.
+If a run still spends more than its budget, the overshoot is never hidden.
+It appears in the summary line (`412k of 400k tokens (over by 12k)`), in the colophon, and as a warning on stderr, which lands in the systemd journal on the server.
+
+Each run ends with one summary line on stdout:
+
+```
+paper 2026-11-25: 312k of 400k tokens, 41 stories, 28 of 39 sources summarised, 2 editor fallbacks, delivered as The Daily Brief 2026-11-25.epub
+```
+
+With `-no-deliver` the end of the line reads `saved to <path>` instead.
+
+### Running it
+
+```sh
+daily-brief paper                # research, write and deliver today's paper
+daily-brief paper -no-deliver    # build today's paper without delivering it
+daily-brief paper -refresh       # build today's paper again
+```
+
+The book is saved to `~/.local/share/daily-brief/papers/` (or under `$XDG_DATA_HOME`).
+`-no-deliver` stops there, which is handy for testing or for opening the book in any EPUB reader.
+
+Files in Dropbox are named `<paper.title> YYYY-MM-DD.epub`, for example `The Daily Brief 2026-11-25.epub`.
+Each edition has its own file name and its own EPUB identifier, because replacing a book under the same name is unreliable on the Kobo.
+A same-day rebuild with `-refresh` is uploaded as `The Daily Brief 2026-11-25 (2).epub`.
+
+Delivery uploads first, and only after the upload succeeds does it delete older editions.
+It deletes only files whose names match that pattern for the configured title, and never the file it just uploaded.
+Everything else in the folder, such as Kobo's own PDF, is never touched.
+
+A second run on the same day without `-refresh` costs nothing.
+If today's paper was already delivered, it does nothing and exits 0.
+If it was built but delivery failed, it delivers the saved book without spending any tokens.
+If today's journal already exists on the machine, it is reused and no research tokens are spent.
+
+### Server setup
+
+The paper runs from a systemd system timer.
+The timer wakes the server from suspend, the service holds an inhibitor lock while it runs, and the server goes back to sleep under its normal idle rule once the run exits.
+The Claude Code CLI must be installed and logged in for the same user (`daily-brief auth status` checks it), and `daily-brief dropbox login` must have been run there.
+
+```ini
+# /etc/systemd/system/daily-brief-paper.service
+[Unit]
+Description=daily-brief morning paper for the Kobo
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=<user>
+LoadCredentialEncrypted=dropbox_refresh_token:/etc/credstore.encrypted/dropbox_refresh_token
+ExecStart=/usr/bin/systemd-inhibit --what=idle:sleep --why="daily-brief paper" /home/<user>/.local/bin/daily-brief paper
+```
+
+```ini
+# /etc/systemd/system/daily-brief-paper.timer
+[Timer]
+OnCalendar=*-*-* 05:45
+WakeSystem=true
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Move the refresh token into an encrypted credential, remove the plain file, and start the timer:
+
+```sh
+sudo systemd-creds encrypt --name=dropbox_refresh_token ~/.config/daily-brief/dropbox.token /etc/credstore.encrypted/dropbox_refresh_token
+shred -u ~/.config/daily-brief/dropbox.token
+sudo systemctl daemon-reload && sudo systemctl enable --now daily-brief-paper.timer
+```
+
+`Persistent=true` runs a missed edition at the next boot, and the same-day rule above makes a catch-up after a manual run harmless.
+Change `OnCalendar` to change the time.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success, or nothing to do because today's paper was already delivered |
+| 1 | Unexpected error |
+| 2 | Config or budget error, for example `paper.token_budget` is missing or not positive |
+| 3 | Research produced no stories: nothing was delivered and yesterday's paper stays on the Kobo |
+| 4 | Delivery failed: the book is kept in `~/.local/share/daily-brief/papers/`, and running the command again delivers it without spending tokens |
+
+If some topics failed or were cut by the budget, the paper is still delivered and the colophon names them.
