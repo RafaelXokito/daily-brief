@@ -647,7 +647,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now daily-brief-paper.ti
 ```
 
 - [ ] **Step 1: Write the section and the README pointer.**
-- [ ] **Step 2: Verify** `go test ./...` still passes (main tests read the usage text) and that no em dash appears: `grep -c "—" README.md docs/GUIDE.md` prints `0` for both.
+- [ ] **Step 2: Verify** `go test ./...` still passes (main tests read the usage text) and that no em dash appears: `grep -c $'\u2014' README.md docs/GUIDE.md` (the em dash character) prints `0` for both.
 - [ ] **Step 3: Commit** `git add README.md docs/GUIDE.md && git commit -m "Docs: the Kobo paper, Dropbox setup and the home server timer"`
 
 ---
