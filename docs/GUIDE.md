@@ -726,7 +726,7 @@ Each story ends with a `[source]` link to the article it summarises (only http a
 The front page has the day's two or three biggest stories first, each with a "continued in" link to its chapter, then "In Brief": one line per other story, grouped under its topic in chapter order.
 Pictures are the source articles' own preview images, scaled to at most 800 px wide and compressed to under 90 KB each.
 A preview image that looks like the site's logo rather than a photo of the story prints small instead, about a fifth of the page wide and floated right, and is scaled to at most 240 px wide.
-It counts as a logo when its file name says so (logo, icon, favicon, brand, avatar, placeholder or default), when the original is under 400 px wide or under 300 px tall, or when it is a few flat colours and nearly square or a wide banner (a flat chart or diagram stays large).
+It counts as a logo when its file name says so (logo, icon, favicon, brand, avatar, placeholder or default), when the original is under 400 px wide or under 300 px tall, or when it is a few flat colours and either nearly square, a wide banner, or mostly one colour (a share card with a small logo on a plain field); a flat chart or diagram, whose bars and lines cover more of it, stays large.
 A picture the editor asked for to help understanding is never made small for its flat colours, only for its file name or size.
 Each front page lead and each chapter's lead story carries its picture, and so does any story the editor marks as needing one because a picture helps the reader understand it (a device, a place, a spacecraft, a route, a chart), at most 6 such stories per book.
 A front page lead whose story already has a picture in its chapter shows the same file, so the book does not grow.

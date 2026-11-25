@@ -39,6 +39,30 @@ func flatLogo(w, h int) *image.RGBA {
 	return img
 }
 
+// barChart draws an invented flat bar chart: five bars in two colours on
+// white with black axes; the bars take a good part of the field, so no
+// single colour covers most of it.
+func barChart(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	heights := []int{70, 90, 55, 80, 65} // percent of the height
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c := color.RGBA{255, 255, 255, 255}
+			if bar := (x - w/16) / (w / 6); x >= w/16 && bar < len(heights) && (x-w/16)%(w/6) < w/8 && h-y < heights[bar]*h/100 {
+				c = color.RGBA{30, 60, 140, 255}
+				if bar%2 == 1 {
+					c = color.RGBA{200, 150, 40, 255}
+				}
+			}
+			if x < w/40 || y > h-h/40 {
+				c = color.RGBA{0, 0, 0, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	return img
+}
+
 // darkSky draws an invented night photo: a black sky with noise and a
 // grey disc whose shading spans many levels, the kind of picture a
 // colour count alone could mistake for a logo.
@@ -103,9 +127,13 @@ func TestLogoLike(t *testing.T) {
 		{"flat nearly square", "https://example.com/share.png", flatLogo(800, 1000), true},
 		{"flat wide banner", "https://example.com/share.png", flatLogo(1600, 400), true},
 		{"flat square saved as JPEG", "https://example.com/share.jpg", asJPEG(t, flatLogo(800, 800)), true},
-		{"flat 4:3 chart", "https://example.com/chart.png", flatLogo(800, 600), false},
-		{"flat 1.9:1 card", "https://example.com/share.png", flatLogo(1200, 630), false},
-		{"flat tall diagram", "https://example.com/route.png", flatLogo(600, 1000), false},
+		{"flat 4:3 chart", "https://example.com/chart.png", barChart(800, 600), false},
+		{"flat 1.9:1 chart", "https://example.com/chart.png", barChart(1200, 630), false},
+		{"flat tall diagram", "https://example.com/route.png", barChart(600, 1000), false},
+		{"share card: a small mark on a flat field", "https://example.com/share.png", flatLogo(1200, 630), true},
+		{"share card saved as JPEG", "https://example.com/share.jpg", asJPEG(t, flatLogo(1200, 630)), true},
+		{"tall card", "https://example.com/share.png", flatLogo(600, 1000), true},
+		{"noisy 1200x630 photo", "https://example.com/harbour.jpg", noisyPhoto(1200, 630), false},
 		{"photo saved as JPEG", "https://example.com/harbour.jpg", asJPEG(t, photo), false},
 		{"no url", "", photo, false},
 		{"bad url", "://", photo, false},
@@ -129,7 +157,8 @@ func TestLogoLikeAid(t *testing.T) {
 	}{
 		{"flat square", "https://example.com/share.png", flatLogo(800, 800), false},
 		{"flat wide banner", "https://example.com/share.png", flatLogo(1600, 400), false},
-		{"flat 4:3 chart", "https://example.com/chart.png", flatLogo(800, 600), false},
+		{"flat 4:3 chart", "https://example.com/chart.png", barChart(800, 600), false},
+		{"share card", "https://example.com/share.png", flatLogo(1200, 630), false},
 		{"logo in the file name", "https://example.com/logo.png", flatLogo(800, 800), true},
 		{"small original", "https://example.com/a.png", noisyPhoto(300, 300), true},
 		{"photo", "https://example.com/harbour.jpg", noisyPhoto(1200, 800), false},

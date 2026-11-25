@@ -341,8 +341,8 @@ Approved by Rafael after reading the second edition.
 Asked by Rafael after reading the edition on the Kobo Libra Colour.
 
 - **Logos small.** Many preview images are only the site's logo.
-  A picture is logo-like when its URL path names it (logo, icon, favicon, brand, avatar, placeholder or default, as whole words; the host and query are not read), when the original is under 400 px wide or under 300 px tall, or when its four most common colours (4 bits per channel, on a 64 by 64 sample) cover 95% of it and it is logo-shaped: nearly square (width over height between 0.8 and 1.25) or a banner wider than 3 to 1.
-  Flat colours alone are not enough, so flat charts and diagrams stay large, and a mostly plain background is not a signal, since a device photographed on white has one.
+  A picture is logo-like when its URL path names it (logo, icon, favicon, brand, avatar, placeholder or default, as whole words; the host and query are not read), when the original is under 400 px wide or under 300 px tall, or when its four most common colours (4 bits per channel, on a 64 by 64 sample) cover 95% of it and it is either logo-shaped, nearly square (width over height between 0.8 and 1.25) or a banner wider than 3 to 1, or a plain field: its most common colour covers 70% of the sample, as a 1200x630 share card with a small logo does.
+  Flat colours alone are not enough, so flat charts and diagrams whose bars cover more of the field stay large, and a plain background without flat colours is not a signal, since a device photographed on white or a night photo has one.
   A `needs_picture` picture (asked for to aid understanding) is made small only by its URL or size, never by flat colours; a picture also shown as a lead or front lead is judged as a lead.
   Such a picture is scaled to at most 240 px wide and prints at 22% of the width, floated right, wherever it appears: front leads (the main picture too), chapter leads and stories that need a picture.
 - **Highlights the Kobo shows.** The Kobo's renderer for plain EPUB (Adobe RMSDK) did not show `<mark class="key">` or its background.

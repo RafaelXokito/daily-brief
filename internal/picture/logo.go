@@ -24,6 +24,9 @@ const (
 	flatSamples = 64
 	flatColours = 4
 	flatShare   = 0.95
+	// fieldShare is how much of a flat picture one colour must cover to
+	// be a plain field with a mark on it, such as a site's share card.
+	fieldShare = 0.70
 
 	// A flat picture is logo-shaped when nearly square (width over
 	// height within [squareMin, squareMax]) or a banner wider than
@@ -55,22 +58,29 @@ var (
 //     and words are whole ("silicon" is not "icon");
 //   - the original is smaller than minPhotoWidth by minPhotoHeight
 //     pixels, too small to be printed large anyway;
-//   - it is flat and logo-shaped: the flatColours most common colours of
-//     a coarse sample (transparency counted as white) cover flatShare of
-//     it, as a logo on a plain field does, and it is nearly square or a
-//     wide banner. Flat colours alone are not enough: a chart or diagram
-//     is flat too, but rarely that shape. A mostly plain background is not
-//     a signal either, since a device photographed on white has one; its
-//     shading and shadows spread over many more colours.
+//   - it is flat, the flatColours most common colours of a coarse sample
+//     (transparency counted as white) covering flatShare of it, and
+//     either logo-shaped (nearly square or a wide banner) or a plain
+//     field, its most common colour covering fieldShare, as a share card
+//     with a small mark on it is, whatever its shape. A flat chart or
+//     diagram is neither: its bars and lines take more of the field. Flat
+//     colours or a plain background alone are not enough: a device
+//     photographed on white has a plain background, but its shading and
+//     shadows spread over many more colours, and so does a night photo.
 //
 // For an Aid picture (one the editor asked for to help the reader
-// understand) only the first two signals count, never flat colours.
+// understand) only the first two signals count, never flat colours, so a
+// mostly white chart stays large.
 func logoLike(src Source, img image.Image) bool {
 	b := img.Bounds()
 	if namedLikeLogo(src.URL) || b.Dx() < minPhotoWidth || b.Dy() < minPhotoHeight {
 		return true
 	}
-	return !src.Aid && logoShaped(b.Dx(), b.Dy()) && flat(img)
+	if src.Aid {
+		return false
+	}
+	top, field := colourShares(img)
+	return top >= flatShare && (logoShaped(b.Dx(), b.Dy()) || field >= fieldShare)
 }
 
 // logoShaped reports whether a w by h picture is nearly square or a wide banner.
@@ -107,8 +117,9 @@ func hasWord(s string, words []string) bool {
 	return false
 }
 
-// flat reports whether img is a few plain colours (see logoLike).
-func flat(img image.Image) bool {
+// colourShares samples img and returns the share of the flatColours most
+// common colours and of the single most common one (see logoLike).
+func colourShares(img image.Image) (top, field float64) {
 	b := img.Bounds()
 	counts := map[[3]uint32]int{}
 	for sy := range flatSamples {
@@ -120,11 +131,12 @@ func flat(img image.Image) bool {
 	}
 	freq := slices.Collect(maps.Values(counts))
 	slices.SortFunc(freq, func(a, b int) int { return cmp.Compare(b, a) })
-	top := 0
-	for _, n := range freq[:min(flatColours, len(freq))] {
-		top += n
+	n := 0
+	for _, c := range freq[:min(flatColours, len(freq))] {
+		n += c
 	}
-	return float64(top) >= flatShare*flatSamples*flatSamples
+	const samples = flatSamples * flatSamples
+	return float64(n) / samples, float64(freq[0]) / samples
 }
 
 // quantise flattens c on white and keeps the top 4 bits of each channel.
