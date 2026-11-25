@@ -30,15 +30,19 @@ import (
 var version = ""
 
 func main() {
-	if err := run(); err != nil {
+	err := run()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "daily-brief:", err)
-		os.Exit(1)
 	}
+	os.Exit(exitCode(err))
 }
 
 const usage = `Usage:
   daily-brief [flags]          open today's journal
   daily-brief budget           show the recommended budget and what the configured one buys
+  daily-brief paper            research, write and deliver today's Kobo paper (see -no-deliver)
+  daily-brief dropbox login    connect Dropbox for paper delivery
+  daily-brief dropbox status   check the Dropbox connection (read-only)
   daily-brief auth set-key     store an Anthropic API key in the macOS Keychain
   daily-brief auth delete-key  remove it
   daily-brief auth status      show which provider and credentials are configured
@@ -61,6 +65,7 @@ func run() error {
 		print      = flag.Bool("print", false, "print the journal instead of opening the TUI: rendered on a terminal, Markdown when piped")
 		edit       = flag.Bool("edit", false, "open the config file in $EDITOR")
 		provider   = flag.String("provider", "", "connection to use for this run: claude-code, anthropic, aws or vertex (overrides config)")
+		noDeliver  = flag.Bool("no-deliver", false, "build today's paper without delivering it")
 		showVer    = flag.Bool("version", false, "print the version and exit")
 	)
 	args := parseArgs()
@@ -84,11 +89,16 @@ func run() error {
 			"token_budget is 0 (auto): the recommended baseline for %s is %s tokens. Run `daily-brief budget` for details.\n",
 			*configPath, cfg.Provider.Type, brief.HumanTokens(brief.Baseline(cfg)))
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
 	if *edit {
 		return openEditor(*configPath)
 	}
 	if args[0] == "auth" {
 		return authCommand(args[1], cfg, *configPath)
+	}
+	if args[0] == "dropbox" {
+		return dropboxCommand(ctx, args[1], cfg)
 	}
 	ov := overrides{provider: *provider, budget: *budget, topics: *topics}
 	if err := ov.apply(&cfg); err != nil {
@@ -96,6 +106,10 @@ func run() error {
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+	if args[0] == "paper" {
+		// The paper has its own budget, so -budget overrides that one.
+		return paperCommand(ctx, cfg, paperFlags{budget: *budget, refresh: *refresh, noDeliver: *noDeliver}, os.Stdout, os.Stderr)
 	}
 	auto := brief.ResolveBudget(&cfg)
 	if args[0] == "budget" {
@@ -370,7 +384,11 @@ func budgetCommand(cfg config.Config, auto bool) error {
 	} else {
 		fmt.Printf("Baseline:  %s tokens (recommended)\n", brief.HumanTokens(a.Baseline))
 	}
-	fmt.Printf("Overview:  %s tokens reserved\n\n", brief.HumanTokens(a.Reserve))
+	fmt.Printf("Overview:  %s tokens reserved\n", brief.HumanTokens(a.Reserve))
+	if line := paperBudgetLines(cfg); line != "" {
+		fmt.Print(line)
+	}
+	fmt.Println()
 
 	fmt.Printf("%-24s %9s %9s %6s\n", "Topic", "Share", "Searches", "Items")
 	for _, t := range a.Topics {
