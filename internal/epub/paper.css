@@ -19,7 +19,7 @@ h3.story { font-family: "Fell SC", serif; font-weight: normal; font-size: 1.05em
 .tag.act { color: #8a1c1c; }
 .standfirst { font-style: italic; font-size: 0.95em; margin-bottom: 0.4em; text-align: left; }
 .dateline { font-family: "Fell SC", serif; font-size: 0.85em; letter-spacing: 0.1em; margin-bottom: 0.3em; text-align: left; }
-.drop::first-letter { float: left; font-family: "Fell SC", serif; font-size: 3.2em; line-height: 0.8; padding: 0.08em 0.1em 0 0; color: #2f5a3a; }
+.drop { float: left; font-family: "Fell SC", serif; font-size: 3.2em; line-height: 0.8; padding: 0.08em 0.1em 0 0; color: #2f5a3a; }
 .srcline { text-align: right; font-style: italic; font-size: 0.85em; }
 .sep { text-align: center; color: #2f5a3a; margin: 1em 0; }
 .hl { text-indent: 0; }

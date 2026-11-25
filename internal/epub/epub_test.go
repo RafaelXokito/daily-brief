@@ -104,6 +104,7 @@ type opfDoc struct {
 	Metadata struct {
 		Identifier string `xml:"identifier"`
 		Title      string `xml:"title"`
+		Creator    string `xml:"creator"`
 		Language   string `xml:"language"`
 		Date       string `xml:"date"`
 		Meta       []struct {
@@ -136,6 +137,9 @@ func TestBuildMetadata(t *testing.T) {
 	}
 	if p.Metadata.Title != "The Daily Brief · 25 November 2026" {
 		t.Errorf("dc:title %q", p.Metadata.Title)
+	}
+	if p.Metadata.Creator != "The Daily Brief" {
+		t.Errorf("dc:creator %q, want the default The Daily Brief", p.Metadata.Creator)
 	}
 	if p.Metadata.Language != "en" || p.Metadata.Date != "2026-11-25" {
 		t.Errorf("dc:language %q, dc:date %q", p.Metadata.Language, p.Metadata.Date)
@@ -229,6 +233,7 @@ func TestBuildRefusesBadBooks(t *testing.T) {
 		{"no identifier", func(b *Book) { b.Identifier = " " }},
 		{"no title", func(b *Book) { b.Title = "" }},
 		{"no cover", func(b *Book) { b.Cover = nil }},
+		{"no date", func(b *Book) { b.Date = time.Time{} }},
 		{"no chapters", func(b *Book) { b.Chapters = nil }},
 		{"path in file name", func(b *Book) { b.Chapters[1].File = "../ch1.xhtml" }},
 		{"subdirectory", func(b *Book) { b.Chapters[1].File = "fonts/ch1.xhtml" }},
@@ -245,5 +250,20 @@ func TestBuildRefusesBadBooks(t *testing.T) {
 				t.Errorf("Build accepted a book with %s", tt.name)
 			}
 		})
+	}
+}
+
+func TestBuildCreatorAndLanguage(t *testing.T) {
+	b := sampleBook()
+	b.Creator, b.Language = "Le Brief & Co", "pt"
+	files := build(t, b)
+	opf := string(files["EPUB/content.opf"])
+	if !strings.Contains(opf, "<dc:creator>Le Brief &amp; Co</dc:creator>") || !strings.Contains(opf, "<dc:language>pt</dc:language>") {
+		t.Errorf("creator or language not in the OPF:\n%s", opf)
+	}
+	for _, name := range []string{"EPUB/ch1.xhtml", "EPUB/nav.xhtml", "EPUB/cover.xhtml"} {
+		if !strings.Contains(string(files[name]), `lang="pt" xml:lang="pt"`) {
+			t.Errorf("%s does not carry the book's language:\n%s", name, files[name])
+		}
 	}
 }

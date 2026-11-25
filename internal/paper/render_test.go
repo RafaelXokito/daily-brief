@@ -68,7 +68,7 @@ func TestRenderStructure(t *testing.T) {
 		`<h2 class="story" id="t0i0">Framework ships a quieter release</h2>`,
 		`<p class="standfirst">Fewer features, more fixes</p>`,
 		`<p class="dateline">AMSTERDAM</p>`,
-		`<p class="drop">The maintainers published a minor release on Tuesday.</p>`,
+		`<p><span class="drop">T</span>he maintainers published a minor release on Tuesday.</p>`,
 		`<h2 class="tier">In Brief</h2>`,
 	} {
 		if !strings.Contains(ch1, want) {
@@ -254,6 +254,50 @@ func assertXML(t *testing.T, name, body string) {
 		if err != nil {
 			t.Errorf("%s is not well-formed XML: %v\n%s", name, err, body)
 			return
+		}
+	}
+}
+
+func TestDropCap(t *testing.T) {
+	tests := []struct{ in, cap, rest string }{
+		{"The day", "T", "he day"},
+		{"\u201cQuoted,\u201d she said", "\u201cQ", "uoted,\u201d she said"},
+		{"\"Plain quote\"", "\"P", "lain quote\""},
+		{"\u00c9t\u00e9 arrives", "\u00c9", "t\u00e9 arrives"},
+		{"42 servers", "4", "2 servers"},
+		{"\u2026", "", "\u2026"},
+		{"", "", ""},
+	}
+	for _, tt := range tests {
+		c, r := dropCap(tt.in)
+		if c != tt.cap || r != tt.rest {
+			t.Errorf("dropCap(%q) = %q, %q; want %q, %q", tt.in, c, r, tt.cap, tt.rest)
+		}
+	}
+}
+
+func TestRenderDropCapFallsBackWithoutALetter(t *testing.T) {
+	p := samplePaper()
+	p.Chapters[0].Stories[0].Paragraphs = []string{"\u2026 and so on.", "Next."}
+	ch1 := Render(p, sampleMeta())[1].Body
+	if strings.Contains(ch1, `class="drop"`) || !strings.Contains(ch1, "<p>\u2026 and so on.</p>") {
+		t.Errorf("paragraph without a letter should render plainly:\n%s", ch1)
+	}
+}
+
+func TestRenderSanitisedIDCollisionLinksTheRightStory(t *testing.T) {
+	p := samplePaper()
+	p.Chapters[0].Stories[1].ID = "a b"
+	p.Chapters[1].Stories[1].ID = "ab"
+	p.Front.InBrief = []editor.FrontLine{{ID: "ab", Sentence: "Second."}, {ID: "a b", Sentence: "First."}}
+	chs := Render(p, sampleMeta())
+	if !strings.Contains(chs[1].Body, `id="ab"`) || !strings.Contains(chs[2].Body, `id="ab-2"`) {
+		t.Fatalf("ids not deduplicated:\n%s\n%s", chs[1].Body, chs[2].Body)
+	}
+	front := chs[0].Body
+	for _, want := range []string{`<a href="ch2.xhtml#ab-2">Second.</a>`, `<a href="ch1.xhtml#ab">First.</a>`} {
+		if !strings.Contains(front, want) {
+			t.Errorf("front lacks %s\n%s", want, front)
 		}
 	}
 }

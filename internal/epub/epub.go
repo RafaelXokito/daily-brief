@@ -28,12 +28,12 @@ type Chapter struct {
 }
 
 // Book is everything Build puts in the EPUB. Cover is a PNG. An empty
-// Language means "en".
+// Language means "en" and an empty Creator "The Daily Brief".
 type Book struct {
-	Title, Identifier, Language string
-	Date                        time.Time
-	Cover                       []byte
-	Chapters                    []Chapter
+	Title, Identifier, Language, Creator string
+	Date                                 time.Time
+	Cover                                []byte
+	Chapters                             []Chapter
 }
 
 // entry is one file of the zip.
@@ -53,6 +53,9 @@ func Build(b Book) ([]byte, error) {
 	if b.Language == "" {
 		b.Language = "en"
 	}
+	if b.Creator == "" {
+		b.Creator = "The Daily Brief"
+	}
 	fontFiles, err := fs.ReadDir(fonts.Files, ".")
 	if err != nil {
 		return nil, fmt.Errorf("epub: fonts: %w", err)
@@ -64,7 +67,7 @@ func Build(b Book) ([]byte, error) {
 		{"EPUB/toc.ncx", ncx(b)},
 		{"EPUB/paper.css", css},
 		{"EPUB/cover.png", b.Cover},
-		{"EPUB/cover.xhtml", xhtml("Cover", `<div class="coverpage"><img src="cover.png" alt="Cover"/></div>`, "cover")},
+		{"EPUB/cover.xhtml", xhtml(b.Language, "Cover", `<div class="coverpage"><img src="cover.png" alt="Cover"/></div>`, "cover")},
 	}
 	for _, f := range fontFiles {
 		data, err := fs.ReadFile(fonts.Files, f.Name())
@@ -74,7 +77,7 @@ func Build(b Book) ([]byte, error) {
 		entries = append(entries, entry{"EPUB/fonts/" + f.Name(), data})
 	}
 	for _, c := range b.Chapters {
-		entries = append(entries, entry{"EPUB/" + c.File, xhtml(c.TOCTitle, c.Body, "")})
+		entries = append(entries, entry{"EPUB/" + c.File, xhtml(b.Language, c.TOCTitle, c.Body, "")})
 	}
 	return zipUp(entries)
 }
@@ -116,6 +119,8 @@ func validate(b Book) error {
 		return errors.New("epub: no title")
 	case len(b.Cover) == 0:
 		return errors.New("epub: no cover")
+	case b.Date.IsZero():
+		return errors.New("epub: no date")
 	case len(b.Chapters) == 0:
 		return errors.New("epub: no chapters")
 	}
@@ -149,10 +154,11 @@ func esc(s string) string {
 	}, s))
 }
 
-func xhtml(title, body, class string) []byte {
+func xhtml(lang, title, body, class string) []byte {
 	var sb strings.Builder
 	sb.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n<!DOCTYPE html>\n")
-	sb.WriteString(`<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en">`)
+	sb.WriteString(`<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="` +
+		esc(lang) + `" xml:lang="` + esc(lang) + `">`)
 	sb.WriteString(`<head><meta charset="utf-8"/><title>` + esc(title) + `</title><link rel="stylesheet" type="text/css" href="paper.css"/></head>`)
 	if class != "" {
 		sb.WriteString(`<body class="` + esc(class) + `">`)
@@ -189,6 +195,7 @@ func opf(b Book, fontFiles []fs.DirEntry) []byte {
 <dc:identifier id="uid">%[2]s</dc:identifier>
 <dc:title>%[3]s</dc:title>
 <dc:language>%[1]s</dc:language>
+<dc:creator>%[8]s</dc:creator>
 <dc:date>%[4]s</dc:date>
 <meta property="dcterms:modified">%[5]s</meta>
 <meta name="cover" content="cover-img"/>
@@ -197,7 +204,7 @@ func opf(b Book, fontFiles []fs.DirEntry) []byte {
 <spine toc="ncx">%[7]s</spine>
 </package>
 `, esc(b.Language), esc(b.Identifier), esc(b.Title), b.Date.Format(time.DateOnly),
-		time.Now().UTC().Format("2006-01-02T15:04:05Z"), m.String(), s.String())
+		time.Now().UTC().Format("2006-01-02T15:04:05Z"), m.String(), s.String(), esc(b.Creator))
 }
 
 func nav(b Book) []byte {
@@ -207,7 +214,7 @@ func nav(b Book) []byte {
 		sb.WriteString(`<li><a href="` + esc(c.File) + `">` + esc(c.TOCTitle) + `</a></li>`)
 	}
 	sb.WriteString("</ol></nav>")
-	return xhtml("Contents", sb.String(), "")
+	return xhtml(b.Language, "Contents", sb.String(), "")
 }
 
 func ncx(b Book) []byte {

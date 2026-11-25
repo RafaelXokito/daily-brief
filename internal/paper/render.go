@@ -41,10 +41,14 @@ type frontEntry struct {
 	Act        bool
 }
 
+// storyView is a story ready for the template. A lead's first paragraph,
+// when it starts with a letter or digit, is split into DropCap and
+// DropRest and left out of Paragraphs.
 type storyView struct {
 	ID, Headline, Standfirst, Dateline, Host string
+	DropCap, DropRest                        string
 	Paragraphs                               []string
-	Act, Drop                                bool
+	Act                                      bool
 }
 
 type chapterView struct {
@@ -61,9 +65,8 @@ type colophonView struct {
 // chN.xhtml per topic with stories, then colophon.xhtml. All text is
 // stripped of control and invisible characters and escaped.
 func Render(p editor.Paper, m Meta) []epub.Chapter {
-	used := ids{}
-	targets := map[string]string{} // safe story id -> "chN.xhtml#id"
-	acts := map[string]bool{}      // safe story id -> tagged ACT
+	reg := newIDs()
+	acts := map[string]bool{} // raw story id -> tagged ACT
 	var chapters []epub.Chapter
 	for _, c := range p.Chapters {
 		if len(c.Stories) == 0 {
@@ -76,13 +79,17 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 		v := chapterView{Heading: heading, Title: title}
 		for _, s := range orderStories(c.Stories) {
 			sv := storyView{
-				ID: used.add(s.ID), Headline: clean(s.Headline), Standfirst: clean(s.Standfirst),
+				ID: reg.add(s.ID, file), Headline: clean(s.Headline), Standfirst: clean(s.Standfirst),
 				Dateline: clean(s.Dateline), Host: clean(s.Host), Paragraphs: cleanAll(s.Paragraphs),
-				Act: s.Tag == "ACT", Drop: s.Placement == "lead",
+				Act: s.Tag == "ACT",
 			}
-			if _, dup := targets[sv.ID]; !dup {
-				targets[sv.ID] = file + "#" + sv.ID
-				acts[sv.ID] = sv.Act
+			if _, seen := acts[s.ID]; !seen {
+				acts[s.ID] = sv.Act
+			}
+			if s.Placement == "lead" && len(sv.Paragraphs) > 0 {
+				if c, rest := dropCap(sv.Paragraphs[0]); c != "" {
+					sv.DropCap, sv.DropRest, sv.Paragraphs = c, rest, sv.Paragraphs[1:]
+				}
 			}
 			if s.Placement == "brief" {
 				v.Briefs = append(v.Briefs, sv)
@@ -94,12 +101,10 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 	}
 	front := struct{ Leads, InBrief []frontEntry }{}
 	for _, l := range p.Front.Leads {
-		id := safeID(l.ID)
-		front.Leads = append(front.Leads, frontEntry{Href: targets[id], Text: clean(l.Headline), Paragraphs: cleanAll(l.Paragraphs), Act: acts[id]})
+		front.Leads = append(front.Leads, frontEntry{Href: reg.href[l.ID], Text: clean(l.Headline), Paragraphs: cleanAll(l.Paragraphs), Act: acts[l.ID]})
 	}
 	for _, l := range p.Front.InBrief {
-		id := safeID(l.ID)
-		front.InBrief = append(front.InBrief, frontEntry{Href: targets[id], Text: clean(l.Sentence), Act: acts[id]})
+		front.InBrief = append(front.InBrief, frontEntry{Href: reg.href[l.ID], Text: clean(l.Sentence), Act: acts[l.ID]})
 	}
 	out := []epub.Chapter{{File: "front.xhtml", TOCTitle: "The Day in Brief", Body: execute("front.xhtml", front)}}
 	out = append(out, chapters...)
@@ -221,16 +226,43 @@ func safeID(id string) string {
 	return id
 }
 
-// ids hands out unique element ids.
-type ids map[string]bool
+// ids hands out unique element ids and remembers where each raw story
+// id was placed, so a link follows the raw id, never a sanitised one that
+// another story's id may also reduce to.
+type ids struct {
+	used map[string]bool   // element ids taken
+	href map[string]string // raw story id -> "chN.xhtml#elementid", first story wins
+}
 
-// add returns safeID(id), suffixed if already taken.
-func (u ids) add(id string) string {
-	base := safeID(id)
+func newIDs() ids { return ids{used: map[string]bool{}, href: map[string]string{}} }
+
+// add returns a unique element id for raw, safeID(raw) suffixed if taken,
+// and records its link target in file.
+func (r ids) add(raw, file string) string {
+	base := safeID(raw)
 	out := base
-	for n := 2; u[out]; n++ {
+	for n := 2; r.used[out]; n++ {
 		out = fmt.Sprintf("%s-%d", base, n)
 	}
-	u[out] = true
+	r.used[out] = true
+	if _, ok := r.href[raw]; !ok {
+		r.href[raw] = file + "#" + out
+	}
 	return out
+}
+
+// dropCap splits a paragraph for a drop cap: any leading punctuation
+// (an opening quote) with the first letter or digit, and the rest. It
+// returns "" and p when p does not start that way.
+func dropCap(p string) (initial, rest string) {
+	for i, r := range p {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			end := i + utf8.RuneLen(r)
+			return p[:end], p[end:]
+		case !unicode.IsPunct(r) || i > 8:
+			return "", p
+		}
+	}
+	return "", p
 }

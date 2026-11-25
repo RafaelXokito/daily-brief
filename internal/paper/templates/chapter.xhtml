@@ -1,9 +1,9 @@
 {{define "story"}}{{if .Act}}<p class="tag act">Act now</p>
 {{end}}{{if .Standfirst}}<p class="standfirst">{{.Standfirst}}</p>
 {{end}}{{if .Dateline}}<p class="dateline">{{.Dateline}}</p>
-{{end}}{{range $i, $p := .Paragraphs}}{{if and $.Drop (eq $i 0)}}<p class="drop">{{$p}}</p>
-{{else}}<p>{{$p}}</p>
-{{end}}{{end}}{{if .Host}}<p class="srcline">From {{.Host}}</p>
+{{end}}{{if .DropCap}}<p><span class="drop">{{.DropCap}}</span>{{.DropRest}}</p>
+{{end}}{{range .Paragraphs}}<p>{{.}}</p>
+{{end}}{{if .Host}}<p class="srcline">From {{.Host}}</p>
 {{end}}{{end -}}
 <p class="chap">{{.Heading}}</p>
 <h1>{{.Title}}</h1>

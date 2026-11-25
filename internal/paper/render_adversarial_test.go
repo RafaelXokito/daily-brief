@@ -1,15 +1,23 @@
 package paper
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/xml"
+	"io"
 	"strings"
 	"testing"
 	"unicode"
 
 	"github.com/RafaelXokito/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/editor"
+	"github.com/RafaelXokito/daily-brief/internal/epub"
 )
 
-func TestRenderEscapes(t *testing.T) {
-	const hostile = "A & B <script>\x07‮</script>"
+const hostile = "A & B <script>\x07\u202e</script>"
+
+// hostilePaper puts markup, control, bidi and invalid characters everywhere.
+func hostilePaper() (editor.Paper, Meta) {
 	p := samplePaper()
 	p.Front.Leads[0].Headline = hostile
 	p.Front.Leads[0].Paragraphs = []string{hostile, "bad utf8 \xff\xfe here￿"}
@@ -21,8 +29,11 @@ func TestRenderEscapes(t *testing.T) {
 	p.Chapters[0].Topic = hostile
 	m := sampleMeta()
 	m.Title, m.Model, m.Cut = hostile, hostile, []string{hostile}
+	return p, m
+}
 
-	chs := Render(p, m)
+func TestRenderEscapes(t *testing.T) {
+	chs := Render(hostilePaper())
 	for _, c := range chs {
 		assertXML(t, c.File, c.Body)
 		for _, field := range []string{c.Body, c.TOCTitle} {
@@ -70,5 +81,47 @@ func TestRenderHostileIDsStillResolve(t *testing.T) {
 				t.Errorf("%s links to %s#%s, which does not exist", c.File, m[1], m[2])
 			}
 		}
+	}
+}
+
+func TestRenderHostileBookRoundTrip(t *testing.T) {
+	p, m := hostilePaper()
+	data, err := epub.Build(epub.Book{Title: hostile, Creator: hostile, Identifier: "urn:test:" + hostile,
+		Date: p.Date, Cover: []byte("\x89PNG"), Chapters: Render(p, m)})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("not a zip: %v", err)
+	}
+	checked := 0
+	for _, f := range zr.File {
+		if !strings.HasSuffix(f.Name, ".xhtml") && !strings.HasSuffix(f.Name, ".opf") &&
+			!strings.HasSuffix(f.Name, ".ncx") && !strings.HasSuffix(f.Name, ".xml") {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", f.Name, err)
+		}
+		d := xml.NewDecoder(rc)
+		d.Strict = true
+		for {
+			_, err := d.Token()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Errorf("%s does not parse: %v", f.Name, err)
+				break
+			}
+		}
+		rc.Close()
+		checked++
+	}
+	// container, OPF, NCX, nav, cover, front, two chapters, colophon.
+	if checked != 9 {
+		t.Errorf("checked %d XML files, want 9", checked)
 	}
 }
