@@ -1001,3 +1001,37 @@ func TestRunSkipsRepeatedPicture(t *testing.T) {
 		t.Errorf("colophon lacks pictures: 1 of 3\n%s", c)
 	}
 }
+
+// A repeated picture is skipped before the budget is checked, so a
+// large generic logo seen twice never stops the pictures after it.
+func TestRunRepeatedPictureDoesNotStopTheBudget(t *testing.T) {
+	e := newRunEnv(t)
+	e.cfg.Topics = []config.Topic{{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"}}
+	e.picture.same = true // equal sizes give equal bytes
+	e.picture.sizes = map[string]int{
+		"https://example.com/alpha/a.jpg": 700_000, // the logo
+		"https://example.com/beta/a.jpg":  700_000, // the logo again: over budget, but a repeat
+		"https://example.com/gamma/a.jpg": 100_000, // a real picture that fits
+	}
+	r, err := e.run(Options{NoDeliver: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := os.ReadFile(r.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := zip.NewReader(bytes.NewReader(book), int64(len(book)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range z.File {
+		if strings.HasPrefix(f.Name, "EPUB/img/") {
+			names = append(names, f.Name)
+		}
+	}
+	if !slices.Equal(names, []string{"EPUB/img/ch1.jpg", "EPUB/img/ch3.jpg"}) {
+		t.Errorf("pictures in the book %v, want ch1.jpg and ch3.jpg", names)
+	}
+}
