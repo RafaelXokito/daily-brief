@@ -22,8 +22,10 @@ func hostilePaper() (editor.Paper, Meta) {
 	p := samplePaper()
 	p.Front.Leads[0].Headline = hostile
 	p.Front.Leads[0].Paragraphs = []string{hostile, "bad utf8 \xff\xfe here￿"}
-	p.Front.InBrief[0].Sentence = hostile
-	p.Front.InBrief[1].ID = `t1i1" onclick="x`
+	p.Front.InBrief[0].Sentences[0].Text = hostile
+	p.Front.InBrief[1].Sentences[0].ID = `t1i1" onclick="x`
+	p.Front.InBrief = append(p.Front.InBrief, editor.BriefParagraph{Topic: hostile, Sentences: []editor.BriefSentence{{ID: "t9i9", Text: hostile}}})
+	p.Front.Leads[0].Image = `a.jpg" onclick="x`
 	s := &p.Chapters[0].Stories[0]
 	s.Headline, s.Standfirst, s.Dateline, s.Host = hostile, hostile, hostile, "evil.example‮<b>"
 	s.Paragraphs = []string{hostile, "]]> <![CDATA[ x"}

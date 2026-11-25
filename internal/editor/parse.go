@@ -60,6 +60,8 @@ type chapterJSON struct {
 const (
 	minLeads      = 2
 	maxFrontLeads = 3
+	minBrief      = 2 // sentences in an In Brief paragraph, or fewer when its topic has fewer stories left
+	maxBrief      = 4
 )
 
 func validPlacement(p string) bool { return p == "lead" || p == "story" || p == "brief" }
@@ -138,15 +140,22 @@ type frontJSON struct {
 		Headline   string   `json:"headline"`
 		Paragraphs []string `json:"paragraphs"`
 	} `json:"leads"`
-	InBrief []struct {
-		ID       string `json:"id"`
-		Sentence string `json:"sentence"`
-	} `json:"in_brief"`
-	CoverLine string `json:"cover_line"`
+	InBrief   []briefJSON `json:"in_brief"`
+	CoverLine string      `json:"cover_line"`
+}
+
+type briefJSON struct {
+	Topic     string `json:"topic"`
+	Sentences []struct {
+		ID   string `json:"id"`
+		Text string `json:"text"`
+	} `json:"sentences"`
 }
 
 // parseFront reads the front page reply. Every id must be a story in the
-// given chapters and may be used only once.
+// given chapters and may be used only once. In Brief is one paragraph per
+// chapter that has stories besides the leads, in chapter order, each of
+// two to four sentences about stories of its own chapter.
 func parseFront(reply string, chapters []Chapter) (FrontPage, error) {
 	raw, err := decodeObject(reply, func(r frontJSON) bool { return len(r.Leads) > 0 && !blank(r.CoverLine) })
 	if err != nil {
@@ -180,18 +189,69 @@ func parseFront(reply string, chapters []Chapter) (FrontPage, error) {
 		}
 		fp.Leads = append(fp.Leads, FrontLead{ID: l.ID, Headline: strings.TrimSpace(l.Headline), Paragraphs: paras})
 	}
-	for _, b := range raw.InBrief {
-		if err := use(b.ID); err != nil {
-			return FrontPage{}, err
-		}
-		if blank(b.Sentence) {
-			return FrontPage{}, fmt.Errorf("in brief %q: empty sentence", b.ID)
-		}
-		fp.InBrief = append(fp.InBrief, FrontLine{ID: b.ID, Sentence: strings.TrimSpace(b.Sentence)})
-	}
 	if n := len(fp.Leads); n < minLeads || n > maxFrontLeads {
 		return FrontPage{}, fmt.Errorf("want %d to %d leads, got %d", minLeads, maxFrontLeads, n)
 	}
+	if fp.InBrief, err = parseInBrief(raw.InBrief, chapters, used); err != nil {
+		return FrontPage{}, err
+	}
 	fp.CoverLine = strings.TrimSpace(raw.CoverLine)
 	return fp, nil
+}
+
+// parseInBrief reads the In Brief paragraphs: one per chapter with
+// stories that are not leads, in chapter order.
+func parseInBrief(raw []briefJSON, chapters []Chapter, leads map[string]bool) ([]BriefParagraph, error) {
+	var out []BriefParagraph
+	next := 0
+	for _, c := range chapters {
+		left := map[string]bool{}
+		for _, s := range c.Stories {
+			if !leads[s.ID] {
+				left[s.ID] = true
+			}
+		}
+		if len(left) == 0 {
+			continue
+		}
+		if next == len(raw) || !sameTopic(raw[next].Topic, c.Topic) {
+			return nil, fmt.Errorf("in brief: want a paragraph for %q next", c.Topic)
+		}
+		p, err := briefParagraph(raw[next], c.Topic, left)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+		next++
+	}
+	if next < len(raw) {
+		return nil, fmt.Errorf("in brief: unexpected paragraph %q", raw[next].Topic)
+	}
+	return out, nil
+}
+
+// briefParagraph checks one paragraph against the ids its chapter has
+// left, taking each id it uses.
+func briefParagraph(raw briefJSON, topic string, left map[string]bool) (BriefParagraph, error) {
+	want := min(minBrief, len(left))
+	if n := len(raw.Sentences); n < want || n > maxBrief {
+		return BriefParagraph{}, fmt.Errorf("in brief %q: want %d to %d sentences, got %d", topic, want, maxBrief, n)
+	}
+	p := BriefParagraph{Topic: topic}
+	for _, s := range raw.Sentences {
+		if !left[s.ID] {
+			return BriefParagraph{}, fmt.Errorf("in brief %q: story id %q is not a story of this topic left to use", topic, s.ID)
+		}
+		if blank(s.Text) {
+			return BriefParagraph{}, fmt.Errorf("in brief %q: empty sentence for %q", topic, s.ID)
+		}
+		delete(left, s.ID)
+		p.Sentences = append(p.Sentences, BriefSentence{ID: s.ID, Text: strings.TrimSpace(s.Text)})
+	}
+	return p, nil
+}
+
+// sameTopic compares topics ignoring case and spacing.
+func sameTopic(a, b string) bool {
+	return strings.EqualFold(strings.Join(strings.Fields(a), " "), strings.Join(strings.Fields(b), " "))
 }

@@ -37,26 +37,28 @@ var tmpl = template.Must(template.New("").ParseFS(templateFS, "templates/*.xhtml
 var ordinals = []string{"First", "Second", "Third", "Fourth", "Fifth", "Sixth",
 	"Seventh", "Eighth", "Ninth", "Tenth", "Eleventh", "Twelfth"}
 
-// frontEntry is a lead or an In Brief line. A lead also carries its
-// story's standfirst and the title of the chapter it continues in.
+// frontEntry is a lead or an In Brief sentence. A lead also carries its
+// story's standfirst, the title of the chapter it continues in and its
+// picture, "img/<name>" or "".
 type frontEntry struct {
-	Href, Text, Standfirst, Continued string
-	Paragraphs                        []string
-	Act                               bool
+	Href, Text, Standfirst, Continued, Image string
+	Paragraphs                               []string
+	Act                                      bool
 }
 
-// frontGroup is a topic's In Brief lines; Topic is "" for lines whose
-// story is not in the book.
+// frontGroup is a topic's In Brief paragraph under its title, "Of
+// <Topic>", or "" when neither its stories nor its topic name one.
 type frontGroup struct {
-	Topic string
-	Lines []frontEntry
+	Title     string
+	Sentences []frontEntry
+	chapter   int // where the group sorts: its first placed story's chapter
 }
 
 // placed is what the front page needs from a story in its chapter.
 type placed struct {
-	chapter            int // index among the rendered chapters
-	topic, title, lead string
-	act                bool
+	chapter     int // index among the rendered chapters
+	title, lead string
+	act         bool
 }
 
 // storyView is a story ready for the template. A lead's first paragraph,
@@ -105,7 +107,7 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 				Act: s.Tag == "ACT",
 			}
 			if _, seen := stories[s.ID]; !seen {
-				stories[s.ID] = placed{chapter: n - 1, topic: titleCase(clean(c.Topic)), title: title, lead: sv.Standfirst, act: sv.Act}
+				stories[s.ID] = placed{chapter: n - 1, title: title, lead: sv.Standfirst, act: sv.Act}
 			}
 			if s.Placement == "lead" && s.Image != "" {
 				sv.Image = "img/" + s.Image
@@ -133,33 +135,49 @@ type frontPageView struct {
 	InBrief []frontGroup
 }
 
-// frontView lays out the front page: the leads in the editor's order, then
-// the In Brief lines grouped by their story's chapter in chapter order,
-// keeping the editor's order within a group, and last the lines whose
-// story is not in the book.
+// frontView lays out the front page: the leads in the editor's order,
+// then the In Brief paragraphs in the order of their first placed story's
+// chapter, keeping the editor's order otherwise, and last the paragraphs
+// with no story in the book.
 func frontView(fp editor.FrontPage, reg ids, stories map[string]placed, chapters int) frontPageView {
 	var v frontPageView
 	for _, l := range fp.Leads {
 		s := stories[l.ID]
-		v.Leads = append(v.Leads, frontEntry{Href: reg.href[l.ID], Text: clean(l.Headline), Standfirst: s.lead,
-			Continued: s.title, Paragraphs: cleanAll(l.Paragraphs), Act: s.act})
-	}
-	groups := make([]frontGroup, chapters+1)
-	for _, l := range fp.InBrief {
-		g := chapters
-		s, ok := stories[l.ID]
-		if ok {
-			g = s.chapter
-			groups[g].Topic = s.topic
+		e := frontEntry{Href: reg.href[l.ID], Text: clean(l.Headline), Standfirst: s.lead,
+			Continued: s.title, Paragraphs: cleanAll(l.Paragraphs), Act: s.act}
+		if l.Image != "" {
+			e.Image = "img/" + l.Image
 		}
-		groups[g].Lines = append(groups[g].Lines, frontEntry{Href: reg.href[l.ID], Text: clean(l.Sentence), Act: s.act})
+		v.Leads = append(v.Leads, e)
 	}
-	for _, g := range groups {
-		if len(g.Lines) > 0 {
+	for _, p := range fp.InBrief {
+		if g, ok := briefGroup(p, reg, stories, chapters); ok {
 			v.InBrief = append(v.InBrief, g)
 		}
 	}
+	slices.SortStableFunc(v.InBrief, func(a, b frontGroup) int { return a.chapter - b.chapter })
 	return v
+}
+
+// briefGroup is p ready for the template, titled after its first placed
+// story's chapter, else after its own topic; false when no sentence has text.
+func briefGroup(p editor.BriefParagraph, reg ids, stories map[string]placed, chapters int) (frontGroup, bool) {
+	g := frontGroup{chapter: chapters}
+	placedOne := false
+	for _, b := range p.Sentences {
+		text := clean(b.Text)
+		if text == "" {
+			continue
+		}
+		if s, ok := stories[b.ID]; ok && !placedOne {
+			g.Title, g.chapter, placedOne = s.title, s.chapter, true
+		}
+		g.Sentences = append(g.Sentences, frontEntry{Href: reg.href[b.ID], Text: text})
+	}
+	if topic := clean(p.Topic); !placedOne && topic != "" {
+		g.Title = "Of " + titleCase(topic)
+	}
+	return g, len(g.Sentences) > 0
 }
 
 // sourceURL is raw as a link target when it is an http(s) URL, else "".

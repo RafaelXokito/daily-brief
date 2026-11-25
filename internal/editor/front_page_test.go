@@ -43,15 +43,17 @@ func TestFrontPageExcludesChapter(t *testing.T) {
 	for _, l := range f.Leads {
 		ids = append(ids, l.ID)
 	}
-	for _, l := range f.InBrief {
-		ids = append(ids, l.ID)
+	for _, b := range f.InBrief {
+		for _, s := range b.Sentences {
+			ids = append(ids, s.ID)
+		}
 	}
 	for _, id := range ids {
 		if strings.HasPrefix(id, "t1") {
 			t.Errorf("front page uses %s from a chapter kept off it: %+v", id, f)
 		}
 	}
-	if f.Leads[0].ID != "t0i0" || f.Leads[1].ID != "t0i1" || len(f.InBrief) != 1 || f.InBrief[0].ID != "t2i0" {
+	if f.Leads[0].ID != "t0i0" || f.Leads[1].ID != "t0i1" || len(f.InBrief) != 1 || f.InBrief[0].Topic != "Money" || f.InBrief[0].Sentences[0].ID != "t2i0" {
 		t.Errorf("front = %+v", f)
 	}
 	if strings.Contains(f.CoverLine, "Gateway") {

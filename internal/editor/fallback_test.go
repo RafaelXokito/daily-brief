@@ -55,7 +55,10 @@ func TestFallbackFrontUsesActHighlights(t *testing.T) {
 	if f.CoverLine != "Third thing" {
 		t.Errorf("cover = %q", f.CoverLine)
 	}
-	want := []FrontLine{{"t0i1", "Second thing"}, {"t1i0", "Fourth thing"}}
+	want := []BriefParagraph{
+		{Topic: "A", Sentences: []BriefSentence{{"t0i1", "Second thing."}}},
+		{Topic: "B", Sentences: []BriefSentence{{"t1i0", "Fourth thing."}}},
+	}
 	if !reflect.DeepEqual(f.InBrief, want) {
 		t.Errorf("in brief = %+v", f.InBrief)
 	}
@@ -95,9 +98,11 @@ func TestFallbackFrontDropsUnmatchedActHighlight(t *testing.T) {
 	if f.CoverLine != "Third thing" {
 		t.Errorf("cover = %q", f.CoverLine)
 	}
-	for _, l := range f.InBrief {
-		if l.ID == "t0i2" || l.ID == "t0i0" {
-			t.Errorf("lead repeated in brief: %+v", l)
+	for _, b := range f.InBrief {
+		for _, l := range b.Sentences {
+			if l.ID == "t0i2" || l.ID == "t0i0" {
+				t.Errorf("lead repeated in brief: %+v", l)
+			}
 		}
 	}
 }
@@ -106,5 +111,25 @@ func TestFallbackFrontItemLeadUsesFirstParagraph(t *testing.T) {
 	in := Input{Chapters: []ChapterIn{{FrontPage: true, Items: []ItemIn{{ID: "t0i0", Headline: "H", Prose: "One.\n\nTwo."}}}}}
 	if f := FallbackFront(in); !reflect.DeepEqual(f.Leads[0].Paragraphs, []string{"One."}) {
 		t.Errorf("paragraphs = %v", f.Leads[0].Paragraphs)
+	}
+}
+
+// The fallback In Brief is one paragraph per topic, in chapter order, of
+// the headlines of the stories that are not leads, each a sentence ending
+// with one stop.
+func TestFallbackFrontInBriefParagraphs(t *testing.T) {
+	in := fixtureInput()
+	in.Chapters[0].Items = append(in.Chapters[0].Items,
+		ItemIn{ID: "t0i3", Headline: "Is it over?"}, ItemIn{ID: "t0i4", Headline: "Release `v2` ships · fast."})
+	in.Chapters = append(in.Chapters, ChapterIn{Topic: "C", FrontPage: true})
+
+	f := FallbackFront(in)
+
+	want := []BriefParagraph{
+		{Topic: "A", Sentences: []BriefSentence{{"t0i2", "Third thing."}, {"t0i3", "Is it over?"}, {"t0i4", "Release v2 ships; fast."}}},
+		{Topic: "B", Sentences: []BriefSentence{{"t1i0", "Fourth thing."}}},
+	}
+	if !reflect.DeepEqual(f.InBrief, want) {
+		t.Errorf("in brief = %+v\nwant %+v", f.InBrief, want)
 	}
 }

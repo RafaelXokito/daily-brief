@@ -71,7 +71,7 @@ func (f *runBackend) Summarize(_ context.Context, system, input string) brief.Re
 		return brief.Result{Markdown: chapterReply(input), Tokens: f.editorTokens}
 	case strings.Contains(system, "front page editor"):
 		f.editor++
-		return brief.Result{Markdown: `{"leads":[{"id":"t0i0","headline":"Front one","paragraphs":["Opening."]},{"id":"t1i0","headline":"Front two","paragraphs":["Opening."]}],"in_brief":[],"cover_line":"A quiet morning"}`, Tokens: f.editorTokens}
+		return brief.Result{Markdown: frontReply(input), Tokens: f.editorTokens}
 	}
 	f.overview++
 	return brief.Result{Markdown: "## Today's highlights\n\n- Widgets shipped.", Tokens: 500}
@@ -106,6 +106,33 @@ func chapterReply(input string) string {
 	}
 	b, _ := json.Marshal(out)
 	return string(b)
+}
+
+// frontReply leads with t0i0 and t1i0 and gives each chapter's other
+// stories, up to four, an In Brief paragraph.
+func frontReply(input string) string {
+	type sentence struct {
+		ID   string `json:"id"`
+		Text string `json:"text"`
+	}
+	type paragraph struct {
+		Topic     string     `json:"topic"`
+		Sentences []sentence `json:"sentences"`
+	}
+	var inBrief []paragraph
+	for _, line := range strings.Split(input, "\n") {
+		if topic, ok := strings.CutPrefix(line, "Chapter: "); ok {
+			inBrief = append(inBrief, paragraph{Topic: topic})
+		}
+		if id, ok := strings.CutPrefix(line, "STORY "); ok && id != "t0i0" && id != "t1i0" && len(inBrief[len(inBrief)-1].Sentences) < 4 {
+			p := &inBrief[len(inBrief)-1]
+			p.Sentences = append(p.Sentences, sentence{id, "Something happened."})
+		}
+	}
+	inBrief = slices.DeleteFunc(inBrief, func(p paragraph) bool { return len(p.Sentences) == 0 })
+	b, _ := json.Marshal(inBrief)
+	return `{"leads":[{"id":"t0i0","headline":"Front one","paragraphs":["Opening."]},{"id":"t1i0","headline":"Front two","paragraphs":["Opening."]}],"in_brief":` +
+		string(b) + `,"cover_line":"A quiet morning"}`
 }
 
 // fakeFetch returns an article for every "/a" URL and a failure otherwise.

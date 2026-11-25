@@ -52,7 +52,10 @@ func TestPromptCarriesRules(t *testing.T) {
 		}
 	}
 	fsys, _ := frontPrompt(Input{}, nil)
-	for _, want := range []string{`"cover_line"`, `"in_brief"`, "Do not add"} {
+	for _, want := range []string{
+		`"cover_line"`, `"in_brief"`, "Do not add", "two to four sentences",
+		`{"leads":[{"id":"","headline":"","paragraphs":[""]}],"in_brief":[{"topic":"","sentences":[{"id":"","text":""}]}],"cover_line":""}`,
+	} {
 		if !strings.Contains(fsys, want) {
 			t.Errorf("front system prompt lacks %q", want)
 		}

@@ -21,9 +21,9 @@ func samplePaper() editor.Paper {
 				{ID: "t0i0", Headline: "Framework ships a quieter release", Paragraphs: []string{"The maintainers published a minor release.", "Upgrades are optional."}},
 				{ID: "t1i0", Headline: "Patch the gateway today", Paragraphs: []string{"A flaw in a popular gateway is being exploited."}},
 			},
-			InBrief: []editor.FrontLine{
-				{ID: "t0i1", Sentence: "A build tool gained a faster cache."},
-				{ID: "t1i1", Sentence: "A password manager changed its pricing."},
+			InBrief: []editor.BriefParagraph{
+				{Topic: "Java & Quarkus", Sentences: []editor.BriefSentence{{ID: "t0i1", Text: "A build tool gained a faster cache."}}},
+				{Topic: "security", Sentences: []editor.BriefSentence{{ID: "t1i1", Text: "A password manager changed its pricing."}}},
 			},
 			CoverLine: "Patch the gateway today",
 		},
@@ -190,14 +190,19 @@ func TestRenderLinksResolve(t *testing.T) {
 
 func TestRenderUnknownFrontIDIsUnlinked(t *testing.T) {
 	p := samplePaper()
-	p.Front.InBrief = append(p.Front.InBrief, editor.FrontLine{ID: "t9i9", Sentence: "An orphan line."})
+	p.Front.InBrief[1].Sentences = append(p.Front.InBrief[1].Sentences, editor.BriefSentence{ID: "t9i9", Text: "An orphan line."})
+	p.Front.InBrief = append(p.Front.InBrief, editor.BriefParagraph{Topic: "elsewhere", Sentences: []editor.BriefSentence{{ID: "t8i8", Text: "Another orphan."}}})
 	front := Render(p, sampleMeta())[0].Body
-	if !strings.Contains(front, "An orphan line.") {
-		t.Fatalf("orphan line dropped")
+	if !strings.Contains(front, "An orphan line.") || !strings.Contains(front, "Another orphan.") {
+		t.Fatalf("orphan line dropped\n%s", front)
 	}
-	if strings.Contains(front, "t9i9") {
+	if strings.Contains(front, "t9i9") || strings.Contains(front, "t8i8") {
 		t.Errorf("orphan line is linked:\n%s", front)
 	}
+	if !strings.Contains(front, `<h2 class="brief-topic">Of Elsewhere</h2>`) {
+		t.Errorf("a paragraph whose stories are not in the book lacks its topic heading:\n%s", front)
+	}
+	assertXML(t, "front", front)
 }
 
 func TestRenderColophonOvershoot(t *testing.T) {
@@ -289,7 +294,7 @@ func TestRenderSanitisedIDCollisionLinksTheRightStory(t *testing.T) {
 	p := samplePaper()
 	p.Chapters[0].Stories[1].ID = "a b"
 	p.Chapters[1].Stories[1].ID = "ab"
-	p.Front.InBrief = []editor.FrontLine{{ID: "ab", Sentence: "Second."}, {ID: "a b", Sentence: "First."}}
+	p.Front.InBrief = []editor.BriefParagraph{{Sentences: []editor.BriefSentence{{ID: "ab", Text: "Second."}, {ID: "a b", Text: "First."}}}}
 	chs := Render(p, sampleMeta())
 	if !strings.Contains(chs[1].Body, `id="ab"`) || !strings.Contains(chs[2].Body, `id="ab-2"`) {
 		t.Fatalf("ids not deduplicated:\n%s\n%s", chs[1].Body, chs[2].Body)
@@ -334,12 +339,13 @@ func TestRenderSourceLine(t *testing.T) {
 
 func TestRenderFrontLayout(t *testing.T) {
 	p := samplePaper()
-	// Two In Brief lines from the first chapter, one from the second,
-	// listed out of chapter order.
-	p.Front.InBrief = []editor.FrontLine{
-		{ID: "t1i1", Sentence: "A password manager changed its pricing."},
-		{ID: "t0i1", Sentence: "A build tool gained a faster cache."},
-		{ID: "t0i2", Sentence: "Conference dates were announced."},
+	// The second chapter's paragraph listed before the first's.
+	p.Front.InBrief = []editor.BriefParagraph{
+		{Topic: "security", Sentences: []editor.BriefSentence{{ID: "t1i1", Text: "A password manager changed its pricing."}}},
+		{Topic: "Java & Quarkus", Sentences: []editor.BriefSentence{
+			{ID: "t0i2", Text: "Conference dates were announced."},
+			{ID: "t0i1", Text: "A build tool gained a faster cache."},
+		}},
 	}
 	chs := Render(p, sampleMeta())
 	front := chs[0].Body
@@ -349,9 +355,10 @@ func TestRenderFrontLayout(t *testing.T) {
 		`<p class="continued"><a href="ch1.xhtml#t0i0">continued in Of Java &amp; Quarkus</a></p>`,
 		`<p class="continued"><a href="ch2.xhtml#t1i0">continued in Of Security</a></p>`,
 		`<h2 class="tier">In Brief</h2>`,
-		`<h3 class="topic-head">Java &amp; Quarkus</h3>`,
-		`<h3 class="topic-head">Security</h3>`,
-		`<hr class="topic-rule"/>`,
+		`<h2 class="brief-topic">Of Java &amp; Quarkus</h2>`,
+		`<h2 class="brief-topic">Of Security</h2>`,
+		`<p class="brief"><a href="ch1.xhtml#t0i2">Conference dates were announced.</a> <a href="ch1.xhtml#t0i1">A build tool gained a faster cache.</a></p>`,
+		`<p class="brief"><a href="ch2.xhtml#t1i1">A password manager changed its pricing.</a></p>`,
 	} {
 		if !strings.Contains(front, want) {
 			t.Errorf("front page lacks %s\n%s", want, front)
@@ -360,12 +367,20 @@ func TestRenderFrontLayout(t *testing.T) {
 	if n := strings.Count(front, "⁂"); n != 1 {
 		t.Errorf("front page has %d ⁂, want 1 between its two leads", n)
 	}
-	if n := strings.Count(front, `class="topic-rule"`); n != 1 {
-		t.Errorf("front page has %d topic rules, want 1 between its two groups", n)
+	if n := strings.Count(front, `<p class="brief">`); n != 2 {
+		t.Errorf("front page has %d In Brief paragraphs, want 2 (one per topic)", n)
+	}
+	if n := strings.Count(front, `<p class="brief-fl">`); n != 2 {
+		t.Errorf("front page has %d topic fleurons, want 2 (one per topic heading)", n)
+	}
+	for _, gone := range []string{"topic-head", "topic-rule", `class="hl"`, "Act now."} {
+		if strings.Contains(front, gone) {
+			t.Errorf("front page still has %q\n%s", gone, front)
+		}
 	}
 	order := []string{
 		"Framework ships a quieter release", "continued in Of Java", "⁂", "Patch the gateway today", "continued in Of Security",
-		"In Brief", `topic-head">Java`, "A build tool gained", "Conference dates", "topic-rule", `topic-head">Security`, "A password manager",
+		"In Brief", `brief-topic">Of Java`, "brief-fl", "Conference dates", "A build tool gained", `brief-topic">Of Security`, "A password manager",
 	}
 	last := -1
 	for _, s := range order {
@@ -374,6 +389,53 @@ func TestRenderFrontLayout(t *testing.T) {
 			t.Fatalf("%q is out of place on the front page:\n%s", s, front)
 		}
 		last = i
+	}
+	assertXML(t, "front", front)
+}
+
+// A front lead's picture shows right under its headline, full width for
+// the first lead and smaller for the others; a lead without one shows
+// nothing in its place.
+func TestRenderFrontLeadPictures(t *testing.T) {
+	p := samplePaper()
+	p.Front.Leads[0].Image = "front1.jpg"
+	p.Front.Leads[1].Image = "ch2.jpg"
+
+	front := Render(p, sampleMeta())[0].Body
+
+	for _, tc := range []struct{ img, head, next string }{
+		{`<img class="lead-main" src="img/front1.jpg" alt="Framework ships a quieter release"/>`,
+			`Framework ships a quieter release</a></h2>`, `<p class="standfirst">Fewer features`},
+		{`<img class="lead-pic" src="img/ch2.jpg" alt="Patch the gateway today"/>`,
+			`Patch the gateway today</a></h2>`, `<p class="tag act">`},
+	} {
+		h, i, n := strings.Index(front, tc.head), strings.Index(front, tc.img), strings.Index(front, tc.next)
+		if i < 0 || h < 0 || !(h < i && i < n) {
+			t.Errorf("%s not right under %s\n%s", tc.img, tc.head, front)
+		}
+	}
+	if n := strings.Count(front, "<img"); n != 2 {
+		t.Errorf("front page has %d pictures, want 2", n)
+	}
+	assertXML(t, "front", front)
+}
+
+// Review Focus 5: no lead with a picture leaves no picture element, empty
+// wrapper or picture class behind.
+func TestRenderFrontLeadsWithoutPictures(t *testing.T) {
+	p := samplePaper()
+	p.Front.Leads[1].Image = "ch2.jpg"
+	front := Render(p, sampleMeta())[0].Body
+	if strings.Contains(front, "lead-main") || strings.Count(front, "<img") != 1 {
+		t.Errorf("only the second lead has a picture, want one lead-pic and no lead-main\n%s", front)
+	}
+
+	front = Render(samplePaper(), sampleMeta())[0].Body
+
+	for _, gone := range []string{"<img", "lead-main", "lead-pic", "<figure", `class="pic"`, `src=""`} {
+		if strings.Contains(front, gone) {
+			t.Errorf("front page without pictures has %q\n%s", gone, front)
+		}
 	}
 	assertXML(t, "front", front)
 }

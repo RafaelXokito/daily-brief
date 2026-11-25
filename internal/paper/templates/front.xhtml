@@ -4,12 +4,13 @@
 <p class="fl">❦</p>
 {{range $i, $l := .Leads}}{{if $i}}<p class="sep">⁂</p>
 {{end}}<h2 class="story">{{template "link" $l}}</h2>
-{{if .Act}}<p class="tag act">Act now</p>
+{{if .Image}}<img class="{{if $i}}lead-pic{{else}}lead-main{{end}}" src="{{.Image}}" alt="{{.Text}}"/>
+{{end}}{{if .Act}}<p class="tag act">Act now</p>
 {{end}}{{if .Standfirst}}<p class="standfirst">{{.Standfirst}}</p>
 {{end}}{{range .Paragraphs}}<p>{{.}}</p>
 {{end}}{{if .Href}}<p class="continued"><a href="{{.Href}}">continued in {{.Continued}}</a></p>
 {{end}}{{end}}{{if .InBrief}}<h2 class="tier">In Brief</h2>
-{{range $i, $g := .InBrief}}{{if $i}}<hr class="topic-rule"/>
-{{end}}{{if .Topic}}<h3 class="topic-head">{{.Topic}}</h3>
-{{end}}{{range .Lines}}<p class="hl">{{if .Act}}<span class="tag act">Act now.</span> {{end}}{{template "link" .}}</p>
-{{end}}{{end}}{{end}}
+{{range .InBrief}}{{if .Title}}<h2 class="brief-topic">{{.Title}}</h2>
+<p class="brief-fl">❧</p>
+{{end}}<p class="brief">{{range $j, $s := .Sentences}}{{if $j}} {{end}}{{template "link" $s}}{{end}}</p>
+{{end}}{{end}}

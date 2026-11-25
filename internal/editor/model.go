@@ -53,15 +53,24 @@ type Chapter struct {
 type FrontLead struct {
 	ID, Headline string
 	Paragraphs   []string
+	// Image is the book-internal file name of the lead's picture, or "".
+	// paper.Run sets it; the model never does.
+	Image string
 }
 
-// FrontLine is one "In Brief" line on the front page.
-type FrontLine struct{ ID, Sentence string }
+// BriefSentence is one sentence of an In Brief paragraph, about the story ID.
+type BriefSentence struct{ ID, Text string }
+
+// BriefParagraph is a topic's In Brief paragraph on the front page.
+type BriefParagraph struct {
+	Topic     string
+	Sentences []BriefSentence
+}
 
 // FrontPage is the paper's front page.
 type FrontPage struct {
 	Leads     []FrontLead
-	InBrief   []FrontLine
+	InBrief   []BriefParagraph
 	CoverLine string
 }
 

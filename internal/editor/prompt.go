@@ -32,13 +32,13 @@ const frontSystem = `You are the front page editor of a morning newspaper. You a
 Rules:
 - Write in modern newspaper English. Put the most important fact first. No fragments and no "·" lists.
 - Choose two or three lead stories. For each, write a headline and two short opening paragraphs, using only the story's own text.
-- Write one sentence for each remaining story for "the day in brief".
+- For "the day in brief", write one short paragraph for each chapter that has stories besides your leads, in chapter order, with the chapter's name as its topic. A paragraph is two to four sentences, flowing as prose, on the chapter's most notable remaining stories (one sentence if only one story is left). Each sentence is about one story of that chapter and carries that story's id; use each story at most once. You need not cover every story.
 - Write one italic cover line for the day's lead story.
 - Do not add facts, numbers, versions, names, places, dates or claims that are not in the text you were given. Keep the stories' hedges, and where texts disagree, say so.
 - Use only the given ids, and each id at most once.
 
 Reply with one JSON object and nothing else, in this shape:
-{"leads":[{"id":"","headline":"","paragraphs":[""]}],"in_brief":[{"id":"","sentence":""}],"cover_line":""}`
+{"leads":[{"id":"","headline":"","paragraphs":[""]}],"in_brief":[{"topic":"","sentences":[{"id":"","text":""}]}],"cover_line":""}`
 
 var delimiterRe = regexp.MustCompile(`(?i)[<\x{FF1C}]\s*\\?\s*/?\s*article`)
 

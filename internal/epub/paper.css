@@ -24,8 +24,11 @@ h3.story { font-family: "Fell SC", serif; font-weight: normal; font-size: 1.05em
 .drop { float: left; font-family: "Fell SC", serif; font-size: 3.2em; line-height: 0.8; padding: 0.08em 0.1em 0 0; color: #2f5a3a; }
 .source { text-align: right; font-style: italic; font-size: 0.85em; }
 .continued { font-style: italic; font-size: 0.9em; text-align: right; }
-h3.topic-head { font-family: "Fell SC", serif; font-weight: normal; font-size: 0.95em; letter-spacing: 0.1em; color: #2f5a3a; margin: 0.8em 0 0.3em 0; text-align: left; }
-hr.topic-rule { border: 0; border-top: 1px solid #2a2318; width: 30%; margin: 0.9em auto; }
+h2.brief-topic { font-family: "Fell", serif; font-style: italic; font-weight: normal; text-align: center; font-size: 1.3em; margin: 1.2em 0 0 0; page-break-after: avoid; }
+.brief-fl { text-align: center; color: #2f5a3a; font-size: 0.9em; margin: 0 0 0.5em 0; page-break-after: avoid; }
+.brief a { color: #2a2318; text-decoration: none; }
+img.lead-main { display: block; width: 100%; height: auto; margin: 0.4em 0 0.6em 0; }
+img.lead-pic { float: right; width: 45%; height: auto; margin: 0.2em 0 0.4em 0.8em; }
+.sep, h2.tier { clear: both; }
 .sep { text-align: center; color: #2f5a3a; margin: 1em 0; }
-.hl { text-indent: 0; }
 .center { text-align: center; }

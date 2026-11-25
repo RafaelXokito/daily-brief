@@ -75,8 +75,8 @@ func covered(text string, known map[string]bool) bool {
 }
 
 // checkFront reports whether every fact on the front page has a source:
-// each lead and In Brief line in its own story plus that story's item and
-// article, and the cover line in any of them.
+// each lead and each In Brief sentence in its own story plus that story's
+// item and article, and the cover line in any of them.
 func checkFront(fp FrontPage, chapters []Chapter, items map[string]ItemIn) bool {
 	own := map[string]string{}
 	var all []string
@@ -91,9 +91,11 @@ func checkFront(fp FrontPage, chapters []Chapter, items map[string]ItemIn) bool 
 			return false
 		}
 	}
-	for _, b := range fp.InBrief {
-		if !covered(b.Sentence, factTokens(own[b.ID])) {
-			return false
+	for _, p := range fp.InBrief {
+		for _, b := range p.Sentences {
+			if !covered(b.Text, factTokens(own[b.ID])) {
+				return false
+			}
 		}
 	}
 	return covered(fp.CoverLine, factTokens(strings.Join(all, "\n")))

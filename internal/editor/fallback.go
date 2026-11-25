@@ -28,10 +28,11 @@ func FallbackStory(it ItemIn, placement string) Story {
 }
 
 // FallbackFront builds the front page without the model. Leads are the
-// first two "act" highlights, else the first two items; In Brief is every
-// other item's headline; the cover line is the first "act" headline, else
-// the first lead's. Chapters kept off the front page, and the highlights
-// about their stories, are left out.
+// first two "act" highlights, else the first two items; In Brief is one
+// paragraph per topic of every other item's headline as a sentence; the
+// cover line is the first "act" headline, else the first lead's. Chapters
+// kept off the front page, and the highlights about their stories, are
+// left out.
 func FallbackFront(in Input) FrontPage {
 	in = frontOnly(in)
 	var all []ItemIn
@@ -68,12 +69,27 @@ func FallbackFront(in Input) FrontPage {
 	if fp.CoverLine == "" && len(fp.Leads) > 0 {
 		fp.CoverLine = fp.Leads[0].Headline
 	}
-	for _, it := range all {
-		if !used[it.ID] {
-			fp.InBrief = append(fp.InBrief, FrontLine{ID: it.ID, Sentence: plain(it.Headline)})
+	for _, c := range in.Chapters {
+		p := BriefParagraph{Topic: c.Topic}
+		for _, it := range c.Items {
+			if !used[it.ID] {
+				p.Sentences = append(p.Sentences, BriefSentence{ID: it.ID, Text: sentence(plain(it.Headline))})
+			}
+		}
+		if len(p.Sentences) > 0 {
+			fp.InBrief = append(fp.InBrief, p)
 		}
 	}
 	return fp
+}
+
+// sentence is s ending with a full stop, unless it already ends with one,
+// a question mark or an exclamation mark.
+func sentence(s string) string {
+	if s == "" || strings.HasSuffix(s, ".") || strings.HasSuffix(s, "?") || strings.HasSuffix(s, "!") {
+		return s
+	}
+	return s + "."
 }
 
 func nonEmpty(ss ...string) []string {

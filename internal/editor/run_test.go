@@ -95,7 +95,7 @@ func goodReplies(extra string) func(system, input string) string {
 	}
 }
 
-const goodFront = `{"leads":[{"id":"t0i0","headline":"Front A","paragraphs":["Opening."]},{"id":"t1i0","headline":"Front B","paragraphs":["Opening."]}],"in_brief":[{"id":"t0i1","sentence":"Short."}],"cover_line":"Cover"}`
+const goodFront = `{"leads":[{"id":"t0i0","headline":"Front A","paragraphs":["Opening."]},{"id":"t1i0","headline":"Front B","paragraphs":["Opening."]}],"in_brief":[{"topic":"Alpha","sentences":[{"id":"t0i1","text":"Short."}]}],"cover_line":"Cover"}`
 
 func newFake(tokens int64) *fakeBackend {
 	return &fakeBackend{chapter: goodReplies(""), front: goodFront, tokens: tokens}
