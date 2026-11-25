@@ -118,8 +118,11 @@ func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, 
 	kept := map[[sha256.Size]byte]bool{}
 	for _, j := range jobs {
 		d := data[j.url]
+		if len(d) == 0 {
+			continue
+		}
 		sum := sha256.Sum256(d)
-		if len(d) == 0 || kept[sum] {
+		if kept[sum] {
 			continue
 		}
 		if total+len(d) > maxPictureBytes {

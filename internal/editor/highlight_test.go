@@ -33,7 +33,11 @@ func TestParseMarks(t *testing.T) {
 			[]string{"One two", "Three four five."}, []string{"four"}},
 		{"nested", []string{"A ==outer ==inner== phrase== here."},
 			[]string{"A outer inner phrase here."}, nil},
-		{"empty mark", []string{"A ==== b."}, []string{"A  b."}, nil},
+		{"four equals signs are text", []string{"A ==== b."}, []string{"A ==== b."}, nil},
+		{"spaced == is text", []string{"if x == y then"}, []string{"if x == y then"}, nil},
+		{"spaced == beside a mark", []string{"x == y and ==key phrase== here, == at the end =="},
+			[]string{"x == y and key phrase here, == at the end =="}, []string{"key phrase"}},
+		{"three equals signs are text", []string{"a ===b=== c"}, []string{"a ===b=== c"}, nil},
 		{"three marks keep the first two", []string{"==One== and ==two==.", "Then ==three==."},
 			[]string{"One and two.", "Then three."}, []string{"One", "two"}},
 		{"twelve words kept", []string{"==" + twelve + "== end."}, []string{twelve + " end."}, []string{twelve}},
@@ -42,8 +46,9 @@ func TestParseMarks(t *testing.T) {
 			[]string{thirteen + " a b."}, []string{"a", "b"}},
 		{"script inside", []string{"Note ==<script>alert(1)</script>== now."},
 			[]string{"Note <script>alert(1)</script> now."}, nil},
-		{"mark at the edge with spaces", []string{"== edge== text"}, []string{"edge text"}, nil},
-		{"only marks", []string{"===="}, nil, nil},
+		{"spaced opening is text, so the closing is unbalanced", []string{"== edge== text"}, []string{"== edge text"}, nil},
+		{"spaced closing is text, so the opening is unbalanced", []string{"a ==edge == text"}, []string{"a edge == text"}, nil},
+		{"blank paragraph", []string{"  "}, nil, nil},
 		{"multibyte", []string{"Em ==Évora, açúcar== subiu."}, []string{"Em Évora, açúcar subiu."}, []string{"Évora, açúcar"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,11 +58,6 @@ func TestParseMarks(t *testing.T) {
 			}
 			if got := marked(paras, hs); !slices.Equal(got, tc.wantMarked) {
 				t.Errorf("marked %q, want %q", got, tc.wantMarked)
-			}
-			for _, p := range paras {
-				if strings.Contains(p, "==") {
-					t.Errorf("paragraph %q keeps a mark", p)
-				}
 			}
 		})
 	}
