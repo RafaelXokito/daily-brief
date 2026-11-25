@@ -91,19 +91,19 @@ func TestTaskPromptListsHistory(t *testing.T) {
 
 func TestNormalizeURL(t *testing.T) {
 	for raw, want := range map[string]string{
-		"https://www.Example.COM/a/b/":                    "example.com/a/b",
-		"http://example.com/a/b#frag":                     "example.com/a/b",
-		"https://example.com/a?utm_source=x&utm_medium=y": "example.com/a",
-		"https://example.com/a?id=7&utm_campaign=z":       "example.com/a?id=7",
-		"https://example.com/":                            "example.com",
-		"":                                                "",
-		"not a url/":                                      "",
-		"/relative/path":                                  "",
-		"javascript:alert(1)":                             "",
-		"ftp://example.com/a":                             "",
-		"https://example.com:443/a":                       "example.com/a",
-		"http://example.com:80/a":                         "example.com/a",
-		"https://example.com:8443/a":                      "example.com:8443/a",
+		"https://www.Example.COM/a/b/":                       "example.com/a/b",
+		"http://example.com/a/b#frag":                        "example.com/a/b",
+		"https://example.com/a?utm_source=x&utm_medium=y":    "example.com/a",
+		"https://example.com/a?id=7&utm_campaign=z":          "example.com/a?id=7",
+		"https://example.com/":                               "example.com",
+		"":                                                   "",
+		"not a url/":                                         "",
+		"/relative/path":                                     "",
+		"javascript:alert(1)":                                "",
+		"ftp://example.com/a":                                "",
+		"https://example.com:443/a":                          "example.com/a",
+		"http://example.com:80/a":                            "example.com/a",
+		"https://example.com:8443/a":                         "example.com:8443/a",
 		"https://nvd.nist.gov/vuln/detail/CVE-2026-1234#ref": "nvd.nist.gov/vuln/detail/CVE-2026-1234",
 	} {
 		if got := normalizeURL(raw); got != want {
