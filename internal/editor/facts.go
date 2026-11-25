@@ -44,15 +44,30 @@ func storyText(s Story) string {
 	return strings.Join(append([]string{s.Headline, s.Standfirst, s.Dateline}, s.Paragraphs...), "\n")
 }
 
-// citesResearch reports whether text uses "the research", the pipeline's
-// internal name for the digest, which a newspaper never prints.
+// researchPhrases are the ways a story attributes a claim to "the research",
+// the pipeline's internal name for the digest. Other uses of the phrase, such
+// as "the research team", are ordinary prose.
+var researchPhrases = []string{
+	"according to the research", "the research says", "the research said", "the research does not",
+	"the research advises", "the research notes", "the research reports", "which the research",
+	"per the research", "the research behind this report",
+}
+
+// citesResearch reports whether text attributes a claim to the research,
+// ignoring case and spacing.
 func citesResearch(text string) bool {
-	return strings.Contains(strings.ToLower(strings.Join(strings.Fields(text), " ")), "the research")
+	t := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	for _, p := range researchPhrases {
+		if strings.Contains(t, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkStory reports whether every number, version, CVE id and money amount
 // in the story appears in its item or article, and every word of the
-// dateline does too. A story that cites "the research" fails.
+// dateline does too. A story that attributes a claim to "the research" fails.
 func checkStory(s Story, it ItemIn) bool {
 	if citesResearch(storyText(s)) {
 		return false

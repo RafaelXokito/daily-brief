@@ -90,15 +90,21 @@ func TestCheckStoryRejectsTheResearch(t *testing.T) {
 	for name, s := range map[string]Story{
 		"paragraph":  {Paragraphs: []string{"Patch today, according to the research."}},
 		"mixed case": {Paragraphs: []string{"The Research advises caution."}},
-		"headline":   {Headline: "What THE RESEARCH says"},
-		"standfirst": {Standfirst: "The research found it."},
+		"headline":   {Headline: "Which the research flags"},
+		"standfirst": {Standfirst: "Per the research, it is fixed."},
+		"says":       {Paragraphs: []string{"Which the research says fixes four advisories."}},
 	} {
 		if checkStory(s, it) {
 			t.Errorf("%s should fail", name)
 		}
 	}
-	if !checkStory(Story{Paragraphs: []string{"Researchers say a new research lab opened."}}, it) {
-		t.Error("other uses of the word research should pass")
+	for _, ok := range []string{
+		"The research, published in Nature, found a new moon.",
+		"The research team opened a lab.",
+	} {
+		if !checkStory(Story{Paragraphs: []string{ok}}, it) {
+			t.Errorf("%q should pass", ok)
+		}
 	}
 }
 
