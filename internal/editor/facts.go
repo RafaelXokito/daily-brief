@@ -49,11 +49,8 @@ func storyText(s Story) string {
 // dateline does too.
 func checkStory(s Story, it ItemIn) bool {
 	src := sourceText(it)
-	known := factTokens(src)
-	for tok := range factTokens(storyText(s)) {
-		if !known[tok] {
-			return false
-		}
+	if !covered(storyText(s), factTokens(src)) {
+		return false
 	}
 	words := map[string]bool{}
 	for _, w := range wordRe.FindAllString(src, -1) {
@@ -65,4 +62,39 @@ func checkStory(s Story, it ItemIn) bool {
 		}
 	}
 	return true
+}
+
+// covered reports whether every fact token in text is among known.
+func covered(text string, known map[string]bool) bool {
+	for tok := range factTokens(text) {
+		if !known[tok] {
+			return false
+		}
+	}
+	return true
+}
+
+// checkFront reports whether every fact on the front page has a source:
+// each lead and In Brief line in its own story plus that story's item and
+// article, and the cover line in any of them.
+func checkFront(fp FrontPage, chapters []Chapter, items map[string]ItemIn) bool {
+	own := map[string]string{}
+	var all []string
+	for _, c := range chapters {
+		for _, s := range c.Stories {
+			own[s.ID] = storyText(s) + "\n" + sourceText(items[s.ID])
+			all = append(all, own[s.ID])
+		}
+	}
+	for _, l := range fp.Leads {
+		if !covered(strings.Join(append([]string{l.Headline}, l.Paragraphs...), "\n"), factTokens(own[l.ID])) {
+			return false
+		}
+	}
+	for _, b := range fp.InBrief {
+		if !covered(b.Sentence, factTokens(own[b.ID])) {
+			return false
+		}
+	}
+	return covered(fp.CoverLine, factTokens(strings.Join(all, "\n")))
 }

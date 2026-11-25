@@ -138,6 +138,17 @@ func fallbackChapter(c ChapterIn) Chapter {
 	return ch
 }
 
+// itemsByID indexes every item of in by its id.
+func itemsByID(in Input) map[string]ItemIn {
+	out := map[string]ItemIn{}
+	for _, c := range in.Chapters {
+		for _, it := range c.Items {
+			out[it.ID] = it
+		}
+	}
+	return out
+}
+
 // editChapter runs one chapter pass. Stories that fail the fact check, or the
 // whole chapter if the pass cannot run or its reply is unusable, fall back.
 func editChapter(ctx context.Context, b brief.Backend, p *pool, c ChapterIn) Chapter {
@@ -149,10 +160,7 @@ func editChapter(ctx context.Context, b brief.Backend, p *pool, c ChapterIn) Cha
 	if err != nil {
 		return fallbackChapter(c)
 	}
-	items := map[string]ItemIn{}
-	for _, it := range c.Items {
-		items[it.ID] = it
-	}
+	items := itemsByID(Input{Chapters: []ChapterIn{c}})
 	for i, s := range ch.Stories {
 		if !checkStory(s, items[s.ID]) {
 			ch.Stories[i] = FallbackStory(items[s.ID], s.Placement)
@@ -198,7 +206,7 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 	if ctx.Err() == nil {
 		system, input := frontPrompt(in, chapters)
 		if reply, ok := p.pass(ctx, b, newPlan(system, input, frontOutput)); ok {
-			if fp, err := parseFront(reply, chapters); err == nil {
+			if fp, err := parseFront(reply, chapters); err == nil && checkFront(fp, chapters, itemsByID(in)) {
 				front = fp
 			}
 		}
