@@ -1,0 +1,128 @@
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=UnifrakturMaguntia&family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Libre+Franklin:wght@500;800&display=swap" rel="stylesheet">
+<style>
+  .dirs { display:flex; flex-direction:column; gap:40px; }
+  .dir { border:1px solid #ccc3; border-radius:10px; padding:18px; cursor:pointer; }
+  .dir.selected { outline:3px solid #4a7; }
+  .pair { display:flex; gap:22px; flex-wrap:wrap; }
+  .screen { width:300px; height:400px; overflow:hidden; box-shadow:0 2px 10px #0004; position:relative; flex:none; }
+  .cap { font-size:12px; opacity:.7; margin-top:6px; }
+  .note { margin:10px 0 0; font-size:14px; }
+  /* A: Broadsheet */
+  .a { background:#f4f1ea; color:#1b1b1b; font-family:'EB Garamond',serif; }
+  .a .cover { padding:26px 22px; height:100%; box-sizing:border-box; display:flex; flex-direction:column; }
+  .a .rule2 { border-top:3px double #1b1b1b; margin:6px 0; }
+  .a .mast { font-family:'UnifrakturMaguntia',serif; font-size:44px; text-align:center; line-height:1; margin:10px 0 4px; }
+  .a .meta { display:flex; justify-content:space-between; font-size:10px; letter-spacing:.08em; text-transform:uppercase; }
+  .a .lead { font-family:'Playfair Display',serif; font-weight:900; font-size:23px; line-height:1.1; margin:14px 0 6px; }
+  .a .deck { font-style:italic; font-size:13px; }
+  .a .cols { columns:2; column-rule:1px solid #1b1b1b55; column-gap:14px; font-size:11px; line-height:1.35; margin-top:10px; text-align:justify; }
+  .a .cols b { font-family:'Playfair Display',serif; }
+  .a .red { color:#8a1c1c; }
+  .a .page { padding:24px 22px; font-size:13px; line-height:1.45; }
+  .a .kicker { font-family:'Libre Franklin',sans-serif; font-weight:800; font-size:10px; letter-spacing:.14em; color:#8a1c1c; text-transform:uppercase; border-bottom:1px solid #1b1b1b; padding-bottom:4px; }
+  .a h4 { font-family:'Playfair Display',serif; font-weight:900; font-size:22px; line-height:1.1; margin:10px 0 6px; }
+  .a .by { font-size:10px; text-transform:uppercase; letter-spacing:.1em; margin-bottom:8px; }
+  .a .drop::first-letter { font-family:'Playfair Display',serif; font-weight:900; float:left; font-size:46px; line-height:.85; padding:3px 5px 0 0; }
+  /* B: Paperback */
+  .b { background:#fbf6ec; color:#222; font-family:'EB Garamond',serif; }
+  .b .cover { height:100%; display:flex; flex-direction:column; }
+  .b .band { background:#c8642a; color:#fff8ee; flex:0 0 30%; display:flex; align-items:flex-end; justify-content:center; padding-bottom:10px; font-family:'Libre Franklin',sans-serif; font-weight:800; letter-spacing:.3em; font-size:11px; }
+  .b .mid { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:0 24px; border-top:3px solid #fff; border-bottom:3px solid #fff; }
+  .b .t1 { font-family:'Libre Franklin',sans-serif; font-weight:800; font-size:30px; line-height:1.05; letter-spacing:.02em; }
+  .b .t2 { font-size:15px; font-style:italic; margin-top:8px; }
+  .b .t3 { font-size:11px; margin-top:16px; letter-spacing:.12em; text-transform:uppercase; }
+  .b .band2 { background:#c8642a; flex:0 0 22%; display:flex; align-items:center; justify-content:center; }
+  .b .disc { width:40px; height:40px; border-radius:50%; background:#fff8ee; color:#c8642a; display:flex; align-items:center; justify-content:center; font-family:'Libre Franklin',sans-serif; font-weight:800; font-size:13px; }
+  .b .page { padding:30px 26px; font-size:13.5px; line-height:1.5; }
+  .b .num { font-family:'Libre Franklin',sans-serif; font-weight:800; color:#c8642a; font-size:11px; letter-spacing:.3em; text-align:center; }
+  .b h4 { font-family:'Libre Franklin',sans-serif; font-weight:800; text-align:center; font-size:19px; margin:6px 0 18px; }
+  .b .sc { font-variant:small-caps; letter-spacing:.04em; }
+  .b hr { border:0; border-top:1px solid #c8642a; width:40px; margin:14px auto; }
+  /* C: Almanac */
+  .c { background:#efe6d2; color:#2a2318; font-family:'IM Fell English',serif; }
+  .c .cover { height:100%; box-sizing:border-box; padding:16px; }
+  .c .frame { border:2px solid #2a2318; outline:1px solid #2a2318; outline-offset:-7px; height:100%; box-sizing:border-box; padding:24px 18px; display:flex; flex-direction:column; align-items:center; text-align:center; }
+  .c .sm { font-family:'IM Fell English SC',serif; font-size:12px; letter-spacing:.2em; }
+  .c .big { font-family:'IM Fell English SC',serif; font-size:38px; line-height:1; margin:8px 0; }
+  .c .orn { font-size:22px; color:#2f5a3a; margin:6px 0; }
+  .c .emblem { width:92px; height:92px; border:2px solid #2f5a3a; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:12px 0; color:#2f5a3a; font-size:40px; }
+  .c .it { font-style:italic; font-size:14px; }
+  .c .page { padding:28px 26px; font-size:13.5px; line-height:1.5; }
+  .c .chap { text-align:center; font-family:'IM Fell English SC',serif; letter-spacing:.2em; font-size:12px; color:#2f5a3a; }
+  .c h4 { text-align:center; font-family:'IM Fell English',serif; font-style:italic; font-weight:400; font-size:21px; margin:6px 0 4px; }
+  .c .fl { text-align:center; color:#2f5a3a; margin-bottom:12px; }
+  .c .drop::first-letter { float:left; font-size:50px; line-height:.8; padding:4px 6px 0 0; color:#2f5a3a; font-family:'IM Fell English SC',serif; }
+</style>
+
+<h2>Which identity feels like your paper?</h2>
+<p class="subtitle">Each direction shows the cover and a story page at roughly Kobo screen proportions, with real items from the 19 November edition. Colours are deliberately muted, like the Libra Colour's screen. Click one, or tell me what to mix.</p>
+
+<div class="dirs">
+
+<div class="dir" data-choice="broadsheet" onclick="toggleSelect(this)">
+  <h3>A. The Broadsheet</h3>
+  <div class="pair">
+    <div><div class="screen a"><div class="cover">
+      <div class="meta"><span>No. 327</span><span>Wednesday, 19 November 2026</span></div>
+      <div class="rule2"></div>
+      <div class="mast">The Daily Brief</div>
+      <div class="rule2"></div>
+      <div class="meta"><span>Security · AI · Java · Markets</span><span class="red">Edition of the Morning</span></div>
+      <div class="lead">Attackers Seize on Roller Flaw as Patch Lands</div>
+      <div class="deck">Unauthenticated code execution through XML-RPC; upgrade or switch it off today.</div>
+      <div class="cols"><b>Puppet servers at risk.</b> An exploited deserialization bug lets attackers run code as the Puppet service account, and from there reach every managed machine. <b>PHP fixes smuggling.</b> Four branches patched against PHP-FPM request smuggling. <b class="red">Inside:</b> Gemini 4 Neon, the EU cyberattack, and 41 full articles.</div>
+    </div></div><div class="cap">Cover: the front page itself</div></div>
+    <div><div class="screen a"><div class="page">
+      <div class="kicker">Security · Act now</div>
+      <h4>EU confirms AI-powered cyberattack on its systems</h4>
+      <div class="by">Brussels · detected 22 October</div>
+      <p class="drop">A Commission spokesperson confirmed that the attackers used AI tools, the first such attack the bloc has reported. Apps were taken offline and are mostly restored. The investigation continues, and so far there is no evidence that staff data was breached.</p>
+    </div></div><div class="cap">Story page</div></div>
+  </div>
+  <p class="note">A 19th-century newspaper: blackletter nameplate, double rules, a two-column front page, one ink red. Feels like a <em>newspaper</em> more than a book.</p>
+</div>
+
+<div class="dir" data-choice="paperback" onclick="toggleSelect(this)">
+  <h3>B. The Mid-century Paperback</h3>
+  <div class="pair">
+    <div><div class="screen b"><div class="cover">
+      <div class="band">THE MORNING EDITION</div>
+      <div class="mid"><div class="t1">THE DAILY<br>BRIEF</div><div class="t2">Wednesday, 19 November 2026</div><div class="t3">Twelve stories · Forty-one articles</div></div>
+      <div class="band2"><div class="disc">DB</div></div>
+    </div></div><div class="cap">Cover: banded paperback</div></div>
+    <div><div class="screen b"><div class="page">
+      <div class="num">III</div>
+      <h4>Security</h4>
+      <p><span class="sc">A Commission spokesperson</span> confirmed that the attackers used AI tools, the first such attack the bloc has reported. Apps were taken offline and are mostly restored.</p>
+      <hr>
+      <p><span class="sc">Google has launched</span> Gemini 4 Neon, which it says matches Carbon's quality at Flash speed, at three dollars per million input tokens.</p>
+    </div></div><div class="cap">Chapter opener</div></div>
+  </div>
+  <p class="note">A 1950s pocket paperback: bold sans title, one warm accent colour, roman-numeral chapters, small caps. Clean and modern-classic.</p>
+</div>
+
+<div class="dir" data-choice="almanac" onclick="toggleSelect(this)">
+  <h3>C. The Almanac</h3>
+  <div class="pair">
+    <div><div class="screen c"><div class="cover"><div class="frame">
+      <div class="sm">Being a Record of the Day</div>
+      <div class="orn">❦</div>
+      <div class="big">The Daily<br>Brief</div>
+      <div class="it">for Wednesday, the 19th of November</div>
+      <div class="emblem">☉</div>
+      <div class="sm">Security · Artificial Intelligence<br>Java · Markets</div>
+      <div class="orn" style="margin-top:auto">⁂</div>
+      <div class="sm">MMXXVI</div>
+    </div></div></div><div class="cap">Cover: engraved title page</div></div>
+    <div><div class="screen c"><div class="page">
+      <div class="chap">Chapter the Third</div>
+      <h4>Of Security</h4>
+      <div class="fl">❧</div>
+      <p class="drop">A Commission spokesperson confirmed that the attackers used AI tools, the first such attack the bloc has reported. Apps were taken offline, and are for the most part restored.</p>
+    </div></div><div class="cap">Chapter opener</div></div>
+  </div>
+  <p class="note">An old almanac or letterpress book: framed title page, fleurons, drop caps, old-style type, deep green. The most "old book"; the language can lean old-fashioned too, or stay modern.</p>
+</div>
+
+</div>

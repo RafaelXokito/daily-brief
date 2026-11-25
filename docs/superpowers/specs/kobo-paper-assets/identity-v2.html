@@ -1,0 +1,91 @@
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+<style>
+  .pair { display:flex; gap:22px; flex-wrap:wrap; }
+  .screen { width:300px; height:400px; overflow:hidden; box-shadow:0 2px 10px #0004; flex:none; background:#efe6d2; color:#2a2318; font-family:'IM Fell English',serif; }
+  .opt { border:1px solid #ccc3; border-radius:10px; padding:16px; cursor:pointer; }
+  .opt.selected { outline:3px solid #4a7; }
+  .cap { font-size:12px; opacity:.7; margin-top:6px; }
+  .cover { height:100%; box-sizing:border-box; padding:16px; }
+  .frame { border:2px solid #2a2318; outline:1px solid #2a2318; outline-offset:-7px; height:100%; box-sizing:border-box; padding:22px 16px; display:flex; flex-direction:column; align-items:center; text-align:center; }
+  .sm { font-family:'IM Fell English SC',serif; font-size:12px; letter-spacing:.2em; }
+  .orn { font-size:22px; color:#2f5a3a; margin:4px 0; }
+  .mastblock { width:100%; margin:6px 0; }
+  .meta { display:flex; justify-content:space-between; font-family:'IM Fell English SC',serif; font-size:9.5px; letter-spacing:.08em; text-align:left; gap:8px; }
+  .meta span:last-child { text-align:right; }
+  .rule2 { border-top:3px double #2a2318; margin:5px 0; }
+  .mast { font-family:'UnifrakturMaguntia',serif; font-size:42px; line-height:1; margin:8px 0 4px; }
+  .acc { color:var(--acc); }
+  .lead { font-style:italic; font-size:15px; line-height:1.25; margin-top:10px; padding:0 4px; }
+  .page { padding:28px 26px; font-size:13.5px; line-height:1.5; }
+  .chap { text-align:center; font-family:'IM Fell English SC',serif; letter-spacing:.2em; font-size:12px; color:#2f5a3a; }
+  h4 { text-align:center; font-family:'IM Fell English',serif; font-style:italic; font-weight:400; font-size:21px; margin:6px 0 4px; }
+  .fl { text-align:center; color:#2f5a3a; margin-bottom:12px; }
+  .drop::first-letter { float:left; font-size:50px; line-height:.8; padding:4px 6px 0 0; color:#2f5a3a; font-family:'IM Fell English SC',serif; }
+  .story { font-family:'IM Fell English SC',serif; font-size:15px; margin:14px 0 2px; }
+  .tag { font-family:'IM Fell English SC',serif; font-size:10px; letter-spacing:.15em; color:#8a1c1c; }
+  .sep { text-align:center; color:#2f5a3a; margin:10px 0; }
+</style>
+
+<h2>The mix: C's framed cover with A's masthead</h2>
+<p class="subtitle">C's frame, fleurons and paper, with A's nameplate block in place of the title and emblem. Two takes on what fills the space below it; the inside pages are C's chapter style throughout.</p>
+
+<div class="pair" style="margin-bottom:28px">
+  <div class="opt" data-choice="cover-quiet" onclick="toggleSelect(this)">
+    <div class="screen" style="--acc:#2f5a3a"><div class="cover"><div class="frame">
+      <div class="sm">Being a Record of the Day</div>
+      <div class="orn">❦</div>
+      <div class="mastblock">
+        <div class="meta"><span>No. 327</span><span>Wednesday, 19 November 2026</span></div>
+        <div class="rule2"></div>
+        <div class="mast">The Daily Brief</div>
+        <div class="rule2"></div>
+        <div class="meta"><span>Security · AI · Java · Markets</span><span class="acc">Edition of the Morning</span></div>
+      </div>
+      <div class="orn" style="margin-top:auto">⁂</div>
+      <div class="sm">MMXXVI</div>
+    </div></div></div>
+    <div class="cap"><b>1. Quiet cover.</b> Masthead only; same every day except date and number.</div>
+  </div>
+
+  <div class="opt" data-choice="cover-lead" onclick="toggleSelect(this)">
+    <div class="screen" style="--acc:#8a1c1c"><div class="cover"><div class="frame">
+      <div class="sm">Being a Record of the Day</div>
+      <div class="orn">❦</div>
+      <div class="mastblock">
+        <div class="meta"><span>No. 327</span><span>Wednesday, 19 November 2026</span></div>
+        <div class="rule2"></div>
+        <div class="mast">The Daily Brief</div>
+        <div class="rule2"></div>
+        <div class="meta"><span>Security · AI · Java · Markets</span><span class="acc">Edition of the Morning</span></div>
+      </div>
+      <div class="lead">Attackers seize on the Roller flaw as its patch lands; Puppet servers also at risk.</div>
+      <div class="orn" style="margin-top:auto">⁂</div>
+      <div class="sm">MMXXVI</div>
+    </div></div></div>
+    <div class="cap"><b>2. Cover with the day's lead.</b> One italic line from the top story, so the library thumbnail tells you what's inside. A's ink red for "Edition of the Morning".</div>
+  </div>
+</div>
+
+<div class="pair">
+  <div>
+    <div class="screen"><div class="page">
+      <div class="chap">Chapter the Third</div>
+      <h4>Of Security</h4>
+      <div class="fl">❧</div>
+      <p class="drop">A Commission spokesperson confirmed that the attackers used AI tools, the first such attack the bloc has reported. Apps were taken offline, and are for the most part restored.</p>
+    </div></div>
+    <div class="cap">Chapter opener (C, as you liked it)</div>
+  </div>
+  <div>
+    <div class="screen"><div class="page">
+      <div class="story">Google launches Gemini 4 Neon</div>
+      <div class="tag">For your information</div>
+      <p>Google says Neon matches Carbon's quality at Flash speed. It costs three dollars per million input tokens and fifteen per million output, with a million-token context and four levels of thinking.</p>
+      <div class="sep">⁂</div>
+      <div class="story">PHP closes a smuggling hole</div>
+      <div class="tag">Act now</div>
+      <p>Four branches of PHP were patched against request smuggling in PHP-FPM.</p>
+    </div></div>
+    <div class="cap">Stories inside a chapter: small-caps headlines, a quiet tag, ⁂ between stories</div>
+  </div>
+</div>

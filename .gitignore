@@ -2,3 +2,5 @@ daily-brief
 .claude/
 dist/
 *.exe
+.superpowers/
+docs/superpowers/specs/kobo-paper-assets/*.epub
