@@ -176,10 +176,10 @@ func fetchOne(ctx context.Context, client *http.Client, raw string, o Options) A
 	return Article{Text: text, Words: len(strings.Fields(text)), Image: image}
 }
 
-// get fetches raw with client and returns its body, at most max bytes, its
+// get fetches raw with client and returns its body, at most limit bytes, its
 // media type (lower case, "" when the server sent none) and the URL it was
 // finally served from. check vets the media type before the body is read.
-func get(ctx context.Context, client *http.Client, raw string, o Options, accept string, max int64, check func(mediaType string) error) ([]byte, string, *url.URL, error) {
+func get(ctx context.Context, client *http.Client, raw string, o Options, accept string, limit int64, check func(mediaType string) error) ([]byte, string, *url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("bad url: %w", err)
@@ -213,12 +213,12 @@ func get(ctx context.Context, client *http.Client, raw string, o Options, accept
 		return nil, "", nil, err
 	}
 	// Read one byte past the limit so an oversized body is refused, not silently truncated.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, "", nil, err
 	}
-	if int64(len(body)) > max {
-		return nil, "", nil, fmt.Errorf("%w: over %d bytes", ErrTooLarge, max)
+	if int64(len(body)) > limit {
+		return nil, "", nil, fmt.Errorf("%w: over %d bytes", ErrTooLarge, limit)
 	}
 	return body, mt, resp.Request.URL, nil
 }

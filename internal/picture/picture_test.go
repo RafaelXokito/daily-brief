@@ -10,7 +10,9 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -193,5 +195,36 @@ func TestPrepareGivesUpWhenItCannotShrink(t *testing.T) {
 	}
 	if _, err := Prepare(encodePNG(t, img)); err == nil {
 		t.Error("Prepare returned a picture over the byte cap")
+	}
+}
+
+func TestPrepareDecodesOneAtATime(t *testing.T) {
+	var mu sync.Mutex
+	active, peak := 0, 0
+	orig := decode
+	decode = func(r io.Reader) (image.Image, string, error) {
+		mu.Lock()
+		active++
+		peak = max(peak, active)
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		defer func() { mu.Lock(); active--; mu.Unlock() }()
+		return orig(r)
+	}
+	defer func() { decode = orig }()
+	data := encodePNG(t, scene(60, 40))
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := Prepare(data); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if peak != 1 {
+		t.Errorf("%d decodes ran at once, want 1", peak)
 	}
 }

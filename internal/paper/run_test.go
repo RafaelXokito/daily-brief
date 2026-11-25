@@ -132,20 +132,25 @@ func (f *fakeFetch) fetch(_ context.Context, urls []string) map[string]fetch.Art
 // fakePictures returns a JPEG-looking picture of size bytes for each URL,
 // or an error when size is 0.
 type fakePictures struct {
-	mu   sync.Mutex
-	size int
-	same bool // every URL gets the same bytes, like a site's generic logo
-	urls []string
+	mu    sync.Mutex
+	size  int
+	same  bool           // every URL gets the same bytes, like a site's generic logo
+	sizes map[string]int // per-URL size, overriding size
+	urls  []string
 }
 
 func (f *fakePictures) picture(_ context.Context, url string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.urls = append(f.urls, url)
-	if f.size == 0 {
+	size := f.size
+	if n, ok := f.sizes[url]; ok {
+		size = n
+	}
+	if size == 0 {
 		return nil, errors.New("no picture")
 	}
-	data := append([]byte{0xff, 0xd8, 0xff}, make([]byte, f.size-3)...)
+	data := append([]byte{0xff, 0xd8, 0xff}, make([]byte, size-3)...)
 	if !f.same {
 		copy(data[3:], url) // distinct bytes per picture
 	}
@@ -894,6 +899,9 @@ func TestRunImagesCapped(t *testing.T) {
 	e := newRunEnv(t)
 	e.cfg.Topics = []config.Topic{{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"}, {Name: "Delta"}}
 	e.picture.size = 400_000
+	// The fourth would still fit after the third, but the book stops at
+	// the first picture that breaks the budget.
+	e.picture.sizes = map[string]int{"https://example.com/delta/a.jpg": 50_000}
 	if _, err := e.run(Options{NoDeliver: true}); err != nil {
 		t.Fatal(err)
 	}

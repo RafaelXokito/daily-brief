@@ -389,11 +389,11 @@ type pictureJob struct {
 
 // pictures fetches a picture for each chapter's lead story whose source
 // has a preview image, at most fetch.DefaultConcurrency at a time, and
-// keeps them in chapter order while the book's pictures stay within
-// maxPictureBytes. A picture that fails, or whose bytes repeat one already
-// kept (a site's generic logo), is skipped. It returns a copy of p
-// with the kept leads' Image set, the pictures, and how many leads had a
-// preview image.
+// keeps them in chapter order until one would take the book's pictures
+// over maxPictureBytes; that one and the rest are left out. A picture
+// that fails, or whose bytes repeat one already kept (a site's generic
+// logo), is skipped. It returns a copy of p with the kept leads' Image
+// set, the pictures, and how many leads had a preview image.
 func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, []epub.Image, int) {
 	jobs := pictureJobs(p, images)
 	if len(jobs) == 0 {
@@ -420,8 +420,11 @@ func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, 
 	total := 0
 	kept := map[[sha256.Size]byte]bool{}
 	for _, j := range jobs {
+		if total+len(j.data) > maxPictureBytes {
+			break
+		}
 		sum := sha256.Sum256(j.data)
-		if len(j.data) == 0 || kept[sum] || total+len(j.data) > maxPictureBytes {
+		if len(j.data) == 0 || kept[sum] {
 			continue
 		}
 		kept[sum] = true

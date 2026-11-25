@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"sync"
 
 	// Decoders for the formats FetchImage accepts.
 	_ "image/gif"
@@ -41,19 +42,35 @@ var (
 	ErrTooLarge = errors.New("picture: cannot compress under the byte cap")
 )
 
+// decodeMu lets one image at a time be decoded and encoded, so callers
+// running in parallel do not multiply the peak memory of a large picture.
+var decodeMu sync.Mutex
+
+// decode is image.Decode; tests replace it to watch the serialisation.
+var decode = image.Decode
+
 // Prepare decodes a JPEG, PNG, GIF or WebP image and returns it as a
 // JPEG at most MaxWidth pixels wide and MaxBytes long, transparency
 // flattened on white. The header is checked before the image is decoded:
-// sides over 8000 pixels or over 40 megapixels are refused.
+// sides over 8000 pixels or over 40 megapixels are refused, and for WebP
+// every frame header too (it must match the canvas; animation is refused).
+// Concurrent calls decode one at a time.
 func Prepare(data []byte) ([]byte, error) {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("picture: %w", err)
 	}
 	if err := checkSize(cfg.Width, cfg.Height); err != nil {
 		return nil, err
 	}
-	src, _, err := image.Decode(bytes.NewReader(data))
+	if format == "webp" {
+		if err := checkWebP(data); err != nil {
+			return nil, err
+		}
+	}
+	decodeMu.Lock()
+	defer decodeMu.Unlock()
+	src, _, err := decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("picture: %w", err)
 	}
