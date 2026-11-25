@@ -57,8 +57,38 @@ func TestPaperCommandNoDropbox(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "daily-brief dropbox login") {
 		t.Fatalf("err = %v, want a pointer to `daily-brief dropbox login`", err)
 	}
-	if got := exitCode(err); got != 1 {
-		t.Errorf("exit code = %d, want 1", got)
+	if got := exitCode(err); got != 2 {
+		t.Errorf("exit code = %d, want 2 (a configuration error)", got)
+	}
+}
+
+func TestPaperCommandNoToken(t *testing.T) {
+	isolate(t)
+	cfg := config.Default()
+	cfg.Paper.TokenBudget = 1_200_000
+	cfg.Paper.Dropbox.AppKey = "key"
+	var out, errb bytes.Buffer
+	err := paperCommand(context.Background(), cfg, paperFlags{}, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "daily-brief dropbox login") {
+		t.Fatalf("err = %v, want a pointer to `daily-brief dropbox login`", err)
+	}
+	if got := exitCode(err); got != 2 {
+		t.Errorf("exit code = %d, want 2 (a configuration error)", got)
+	}
+}
+
+func TestPaperCommandNoClaude(t *testing.T) {
+	isolate(t)
+	t.Setenv("PATH", t.TempDir())
+	cfg := config.Default()
+	cfg.Paper.TokenBudget = 1_200_000
+	var out, errb bytes.Buffer
+	err := paperCommand(context.Background(), cfg, paperFlags{noDeliver: true}, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "provider.claude_path") {
+		t.Fatalf("err = %v, want the claude CLI not found", err)
+	}
+	if got := exitCode(err); got != 2 {
+		t.Errorf("exit code = %d, want 2 (a configuration error)", got)
 	}
 }
 

@@ -861,6 +861,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 User=<user>
+Environment=PATH=/home/<user>/.local/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=90min
 LoadCredentialEncrypted=dropbox_refresh_token:/etc/credstore.encrypted/dropbox_refresh_token
 ExecStart=/usr/bin/systemd-inhibit --what=idle:sleep --why="daily-brief paper" /home/<user>/.local/bin/daily-brief paper
 ```
@@ -875,6 +877,10 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 ```
+
+A systemd service does not read your shell profile, so `Environment=PATH=` must include the directory that holds the `claude` CLI.
+If it lives elsewhere, add that directory, or set `provider.claude_path` in the server's config to its full path.
+A oneshot service has no start timeout by default, so a hung run would hold the inhibitor lock and keep the server awake; `TimeoutStartSec=90min` stops it, which is far longer than a normal run takes.
 
 Move the refresh token into an encrypted credential, remove the plain file, and start the timer:
 
@@ -893,7 +899,7 @@ Change `OnCalendar` to change the time.
 |---|---|
 | 0 | Success, or nothing to do because today's paper was already delivered |
 | 1 | Unexpected error |
-| 2 | Config or budget error, for example `paper.token_budget` is missing or not positive |
+| 2 | Config or budget error, for example `paper.token_budget` is missing, not positive or too small, `paper.dropbox.app_key` or the Dropbox token is missing, or the `claude` CLI cannot be found |
 | 3 | Research produced no stories: nothing was delivered and yesterday's paper stays on the Kobo |
 | 4 | Delivery failed: the book is kept in `~/.local/share/daily-brief/papers/`, and running the command again delivers it without spending tokens |
 

@@ -83,19 +83,20 @@ func runPaper(ctx context.Context, cfg config.Config, f paperFlags, stderr io.Wr
 }
 
 // paperDeps builds the Claude backend and, unless -no-deliver, the Dropbox
-// deliverer a paper run talks to; tests replace it.
+// deliverer a paper run talks to; tests replace it. A missing app key or
+// token, or a backend that cannot be built, is a configuration error.
 var paperDeps = func(ctx context.Context, cfg config.Config, f paperFlags) (paper.Deps, error) {
 	var deps paper.Deps
 	if !f.noDeliver {
 		client, err := dropboxClient(cfg)
 		if err != nil {
-			return deps, err
+			return deps, fmt.Errorf("%w: %w", paper.ErrConfig, err)
 		}
 		deps.Deliverer = paper.NewDropboxDeliverer(&client, cfg.Paper.FolderOrDefault(), cfg.Paper.TitleOrDefault())
 	}
 	backend, err := brief.NewBackend(ctx, cfg)
 	if err != nil {
-		return deps, err
+		return deps, fmt.Errorf("%w: %w", paper.ErrConfig, err)
 	}
 	deps.Backend = backend
 	return deps, nil
