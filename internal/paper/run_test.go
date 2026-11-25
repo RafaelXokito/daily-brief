@@ -20,6 +20,7 @@ import (
 
 	"github.com/RafaelXokito/daily-brief/internal/brief"
 	"github.com/RafaelXokito/daily-brief/internal/config"
+	"github.com/RafaelXokito/daily-brief/internal/editor"
 	"github.com/RafaelXokito/daily-brief/internal/fetch"
 )
 
@@ -35,7 +36,9 @@ type runBackend struct {
 	tasks                      []brief.Task
 	research, editor, overview int
 	researchErr                error
+	researchMul                int64 // research spends Budget*researchMul/10
 	editorTokens               int64
+	onEditor                   func() // called on each editor pass
 }
 
 func (f *runBackend) Research(_ context.Context, t brief.Task) brief.Result {
@@ -49,12 +52,15 @@ func (f *runBackend) Research(_ context.Context, t brief.Task) brief.Result {
 	slug := strings.ToLower(t.Topic.Name)
 	md := fmt.Sprintf("### %s widget released\nThe widget team shipped a release. [source](https://example.com/%s/a)\n\n"+
 		"### %s gadget recalled\nA gadget maker recalled a batch. [source](https://example.com/%s/b)\n", t.Topic.Name, slug, t.Topic.Name, slug)
-	return brief.Result{Markdown: md, Tokens: t.Budget / 10, Searches: t.Searches}
+	return brief.Result{Markdown: md, Tokens: t.Budget * max(f.researchMul, 1) / 10, Searches: t.Searches}
 }
 
 func (f *runBackend) Summarize(_ context.Context, system, input string) brief.Result {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.onEditor != nil && (strings.Contains(system, "copy editor") || strings.Contains(system, "front page editor")) {
+		f.onEditor()
+	}
 	switch {
 	case strings.Contains(system, "copy editor"):
 		f.editor++
@@ -162,12 +168,16 @@ func newRunEnv(t *testing.T) *runEnv {
 }
 
 func (e *runEnv) run(o Options) (Report, error) {
+	return e.runCtx(context.Background(), o)
+}
+
+func (e *runEnv) runCtx(ctx context.Context, o Options) (Report, error) {
 	o.Log = e.log
 	d := Deps{Backend: e.backend, Fetch: e.fetch.fetch, Now: func() time.Time { return runNow }, Dir: e.dir}
 	if !o.NoDeliver {
 		d.Deliverer = e.deliver
 	}
-	return Run(context.Background(), e.cfg, o, d)
+	return Run(ctx, e.cfg, o, d)
 }
 
 func (e *runEnv) state(t *testing.T) State {
@@ -179,18 +189,25 @@ func (e *runEnv) state(t *testing.T) State {
 	return s
 }
 
-// identifier reads dc:identifier out of an EPUB's package document.
-func identifier(t *testing.T, book []byte) string {
+// epubFile reads one file out of an EPUB.
+func epubFile(t *testing.T, book []byte, name string) []byte {
 	t.Helper()
 	z, err := zip.NewReader(bytes.NewReader(book), int64(len(book)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := z.Open("EPUB/content.opf")
+	f, err := z.Open(name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := io.ReadAll(f)
+	return raw
+}
+
+// identifier reads dc:identifier out of an EPUB's package document.
+func identifier(t *testing.T, book []byte) string {
+	t.Helper()
+	raw := epubFile(t, book, "EPUB/content.opf")
 	m := regexp.MustCompile(`<dc:identifier[^>]*>([^<]+)</dc:identifier>`).FindSubmatch(raw)
 	if m == nil {
 		t.Fatalf("no identifier in %s", raw)
@@ -218,6 +235,104 @@ func TestRunNoBudget(t *testing.T) {
 				t.Fatalf("backend called: %d %d %d", r, ed, ov)
 			}
 		})
+	}
+}
+
+func TestRunConfigErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		noBackend bool
+		noDeliver bool
+	}{
+		{"no deliverer without -no-deliver", false, false},
+		{"no backend", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newRunEnv(t)
+			d := Deps{Backend: e.backend, Fetch: e.fetch.fetch, Now: func() time.Time { return runNow }, Dir: e.dir}
+			if tc.noBackend {
+				d.Backend = nil
+			}
+			_, err := Run(context.Background(), e.cfg, Options{NoDeliver: tc.noDeliver}, d)
+			if !errors.Is(err, ErrConfig) || ExitCode(err) != 2 {
+				t.Fatalf("err = %v, exit %d", err, ExitCode(err))
+			}
+			if r, ed, ov := e.backend.calls(); r+ed+ov != 0 || len(e.fetch.urls) != 0 {
+				t.Fatal("work done before the config was checked")
+			}
+		})
+	}
+}
+
+func TestRunCancelled(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		during string
+	}{
+		{"before research", "research"},
+		{"while editing", "editing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newRunEnv(t)
+			prev := State{Issue: 7, Date: "2026-11-24", File: "The Daily Brief 2026-11-24.epub", Delivered: true}
+			if err := SaveState(e.dir, prev); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := os.ReadFile(filepath.Join(e.dir, stateFile))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.during == "research" {
+				cancel()
+			} else {
+				e.backend.onEditor = cancel
+			}
+			_, err := e.runCtx(ctx, Options{})
+			if !errors.Is(err, context.Canceled) || errors.Is(err, ErrNoStories) || ExitCode(err) != 1 {
+				t.Fatalf("err = %v, exit %d", err, ExitCode(err))
+			}
+			if books, _ := filepath.Glob(filepath.Join(e.dir, "*.epub")); len(books) != 0 {
+				t.Fatalf("books written: %v", books)
+			}
+			after, _ := os.ReadFile(filepath.Join(e.dir, stateFile))
+			if !bytes.Equal(before, after) || e.deliver.count() != 0 {
+				t.Fatalf("state changed or delivered: %s", after)
+			}
+		})
+	}
+}
+
+func TestRunResearchOverspendComesOutOfEditor(t *testing.T) {
+	e := newRunEnv(t)
+	e.backend.researchMul = 25 // each pass spends 2.5 times its allocation
+	var got []int64
+	orig := runEditor
+	runEditor = func(ctx context.Context, b brief.Backend, in editor.Input, budget editor.Budget, n int) editor.Paper {
+		got = append(got, budget.Tokens)
+		return orig(ctx, b, in, budget, n)
+	}
+	defer func() { runEditor = orig }()
+	r, err := e.run(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	split, err := SplitBudget(e.cfg.Paper.TokenBudget, e.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := brief.LoadJournal(runDate)
+	if err != nil || j == nil {
+		t.Fatal(j, err)
+	}
+	research := j.TokensUsed()
+	if research <= split.Research {
+		t.Fatalf("research spent %d of %d: no overspend to test", research, split.Research)
+	}
+	want := max(0, e.cfg.Paper.TokenBudget-research)
+	if len(got) != 1 || got[0] != want || got[0] >= split.Editor {
+		t.Fatalf("editor budget %v, want %d (editor share %d)", got, want, split.Editor)
+	}
+	if r.Over != max(0, r.Spent-r.Budget) {
+		t.Fatalf("report = %+v", r)
 	}
 }
 
@@ -356,7 +471,7 @@ func TestRunDeliveryFails(t *testing.T) {
 	if s := e.state(t); s != (State{Issue: 3, Date: runDate, File: name}) {
 		t.Fatalf("state = %+v", s)
 	}
-	if r.Delivered || !strings.Contains(r.Line(), "saved to") {
+	if r.Delivered || !strings.HasSuffix(r.Line(), "delivery failed, saved to "+filepath.Join(e.dir, name)) {
 		t.Fatalf("report %+v, line %q", r, r.Line())
 	}
 
@@ -444,6 +559,10 @@ func TestRunOvershootReported(t *testing.T) {
 	if !strings.Contains(r.Line(), "over by") || !strings.Contains(e.log.String(), "warning:") {
 		t.Fatalf("line %q, log %q", r.Line(), e.log.String())
 	}
+	colophon := epubFile(t, e.deliver.data[0], "EPUB/colophon.xhtml")
+	if !bytes.Contains(colophon, []byte("over by "+humanTokens(r.Over))) {
+		t.Fatalf("colophon does not record the overshoot: %s", colophon)
+	}
 }
 
 func TestRunCorruptStateWarns(t *testing.T) {
@@ -523,6 +642,9 @@ func TestReportLine(t *testing.T) {
 		{"saved", Report{Date: "2026-11-25", Spent: 312_000, Budget: 400_000, Stories: 41, Summarised: 28, Failed: 11, Fallbacks: 2,
 			File: "/papers/The Daily Brief 2026-11-25.epub"},
 			"paper 2026-11-25: 312k of 400k tokens, 41 stories, 28 of 39 sources summarised, 2 editor fallbacks, saved to /papers/The Daily Brief 2026-11-25.epub"},
+		{"delivery failed", Report{Date: "2026-11-25", Spent: 312_000, Budget: 400_000, Stories: 41, Summarised: 28, Failed: 11, Fallbacks: 2,
+			File: "/papers/The Daily Brief 2026-11-25.epub", deliveryFailed: true},
+			"paper 2026-11-25: 312k of 400k tokens, 41 stories, 28 of 39 sources summarised, 2 editor fallbacks, delivery failed, saved to /papers/The Daily Brief 2026-11-25.epub"},
 		{"skip", Report{Date: "2026-11-25", Action: Skip, File: "/papers/The Daily Brief 2026-11-25.epub", Delivered: true},
 			"paper 2026-11-25: already delivered as The Daily Brief 2026-11-25.epub"},
 		{"redeliver", Report{Date: "2026-11-25", Action: Redeliver, File: "/papers/The Daily Brief 2026-11-25.epub", Delivered: true},
@@ -544,6 +666,7 @@ func TestExitCode(t *testing.T) {
 		{nil, 0},
 		{ErrNoBudget, 2},
 		{fmt.Errorf("wrapped: %w", ErrNoBudget), 2},
+		{fmt.Errorf("wrapped: %w", ErrConfig), 2},
 		{ErrNoStories, 3},
 		{fmt.Errorf("wrapped: %w", ErrDelivery), 4},
 		{errors.New("other"), 1},

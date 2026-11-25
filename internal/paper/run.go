@@ -83,6 +83,12 @@ func Run(ctx context.Context, cfg config.Config, o Options, d Deps) (Report, err
 		o.Log = io.Discard
 	}
 	d = d.withDefaults()
+	if d.Backend == nil {
+		return Report{}, fmt.Errorf("%w: no Claude backend", ErrConfig)
+	}
+	if d.Deliverer == nil && !o.NoDeliver {
+		return Report{}, fmt.Errorf("%w: no deliverer; set up Dropbox delivery or use -no-deliver", ErrConfig)
+	}
 	total := cfg.Paper.TokenBudget
 	if o.Budget != 0 {
 		total = o.Budget
@@ -96,7 +102,7 @@ func Run(ctx context.Context, cfg config.Config, o Options, d Deps) (Report, err
 	}
 	now := d.Now()
 	date := now.Format("2006-01-02")
-	day, _ := time.Parse("2006-01-02", date)
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	x := &run{ctx: ctx, cfg: cfg, o: o, d: d, date: date, day: day, r: Report{Date: date, Budget: total}}
 
 	s, err := LoadState(d.Dir)
@@ -164,14 +170,12 @@ func (x *run) build(s State, split Split) (Report, error) {
 // deliver sends the book named by s.File and, once it arrived, counts the
 // issue and saves the state.
 func (x *run) deliver(s State, data []byte) error {
-	if x.d.Deliverer == nil {
-		return errors.New("paper: no deliverer configured")
-	}
 	warnings, err := x.d.Deliverer.Deliver(x.ctx, s.File, data)
 	for _, w := range warnings {
 		x.warn(w)
 	}
 	if err != nil {
+		x.r.deliveryFailed = true
 		return fmt.Errorf("%w: %v", ErrDelivery, err)
 	}
 	x.r.Delivered = true
@@ -184,13 +188,28 @@ func (x *run) deliver(s State, data []byte) error {
 // finished EPUB.
 func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	j, researchSpent := x.journal(split.Research)
-	if j == nil || len(editor.BuildInput(j, nil).Chapters) == 0 {
+	// A cancelled run (SIGTERM, timeout) must not save a half-made book
+	// that a later run would redeliver as the day's edition.
+	if err := x.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("paper: cancelled during research: %w", err)
+	}
+	if j == nil {
 		return nil, ErrNoStories
 	}
-	in := x.fetchArticles(j)
-	unspent := max(0, split.Research-researchSpent)
+	in := editor.BuildInput(j, nil)
+	if len(in.Chapters) == 0 {
+		return nil, ErrNoStories
+	}
+	in = x.withArticles(in)
+	// The editor gets what research left of the whole budget, so a research
+	// overspend comes out of the editor's share; at 0 it falls back
+	// mechanically.
+	edBudget := editor.Budget{Tokens: max(0, split.Research+split.Editor-researchSpent), MarginPct: MarginPercent, Provider: x.cfg.Provider.Type}
 	x.logf("editing %d chapters", len(in.Chapters))
-	p := editor.Run(x.ctx, x.d.Backend, in, editor.Budget{Tokens: split.Editor + unspent, MarginPct: MarginPercent, Provider: x.cfg.Provider.Type}, x.cfg.Concurrency)
+	p := runEditor(x.ctx, x.d.Backend, in, edBudget, x.cfg.Concurrency)
+	if err := x.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("paper: cancelled during editing: %w", err)
+	}
 
 	x.r.Spent = researchSpent + p.Tokens
 	x.r.Over = max(0, x.r.Spent-x.r.Budget)
@@ -251,12 +270,15 @@ func (x *run) journal(budget int64) (*brief.Journal, int64) {
 	return j, spent
 }
 
-// fetchArticles fetches each item's source once and returns the editor's
-// input with the articles that came through, counting both outcomes.
-func (x *run) fetchArticles(j *brief.Journal) editor.Input {
+// runEditor is editor.Run; tests replace it to see the budget it gets.
+var runEditor = editor.Run
+
+// withArticles fetches each item's source once and returns a copy of in
+// with the articles that came through, counting both outcomes.
+func (x *run) withArticles(in editor.Input) editor.Input {
 	var urls []string
 	seen := map[string]bool{}
-	for _, c := range editor.BuildInput(j, nil).Chapters {
+	for _, c := range in.Chapters {
 		for _, it := range c.Items {
 			if it.URL != "" && !seen[it.URL] {
 				seen[it.URL] = true
@@ -265,18 +287,30 @@ func (x *run) fetchArticles(j *brief.Journal) editor.Input {
 		}
 	}
 	if len(urls) == 0 {
-		return editor.BuildInput(j, nil)
+		return in
 	}
 	x.logf("fetching %d sources", len(urls))
 	articles := x.d.Fetch(x.ctx, urls)
+	texts := map[string]string{}
 	for _, u := range urls {
 		if a := articles[u]; a.Err == nil && strings.TrimSpace(a.Text) != "" {
+			texts[u] = strings.TrimSpace(a.Text)
 			x.r.Summarised++
 		} else {
 			x.r.Failed++
 		}
 	}
-	return editor.BuildInput(j, articles)
+	out := in
+	out.Chapters = make([]editor.ChapterIn, len(in.Chapters))
+	for i, c := range in.Chapters {
+		items := make([]editor.ItemIn, len(c.Items))
+		for k, it := range c.Items {
+			it.Article = texts[it.URL]
+			items[k] = it
+		}
+		out.Chapters[i] = editor.ChapterIn{Topic: c.Topic, Items: items}
+	}
+	return out
 }
 
 // cut names the topics that failed or were cut by the budget.
