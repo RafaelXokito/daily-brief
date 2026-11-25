@@ -3,6 +3,7 @@ package paper
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -232,7 +233,7 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	if x.r.Over > 0 {
 		x.warn(fmt.Sprintf("this paper went over its token budget by %s tokens (%s of %s)", HumanTokens(x.r.Over), HumanTokens(x.r.Spent), HumanTokens(x.r.Budget)))
 	}
-	p, pics, candidates := x.pictures(p, in, images)
+	p, pics, candidates := x.pictures(p, images)
 	if err := x.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("paper: cancelled while fetching pictures: %w", err)
 	}
@@ -360,13 +361,7 @@ func fetchPicture(ctx context.Context, url string) ([]byte, error) {
 
 // pictureJobs lists the chapter leads whose source has a preview image,
 // naming each picture chN.jpg after its chapter as Render numbers them.
-func pictureJobs(p editor.Paper, in editor.Input, images map[string]string) []pictureJob {
-	source := map[string]string{} // item id -> source URL
-	for _, c := range in.Chapters {
-		for _, it := range c.Items {
-			source[it.ID] = it.URL
-		}
-	}
+func pictureJobs(p editor.Paper, images map[string]string) []pictureJob {
 	var jobs []pictureJob
 	n := 0 // only chapters with stories are numbered
 	for ci, c := range p.Chapters {
@@ -378,7 +373,7 @@ func pictureJobs(p editor.Paper, in editor.Input, images map[string]string) []pi
 		if si < 0 {
 			continue
 		}
-		if img := images[source[c.Stories[si].ID]]; img != "" {
+		if img := images[c.Stories[si].URL]; img != "" {
 			jobs = append(jobs, pictureJob{chapter: ci, story: si, name: fmt.Sprintf("ch%d.jpg", n), url: img})
 		}
 	}
@@ -395,11 +390,12 @@ type pictureJob struct {
 // pictures fetches a picture for each chapter's lead story whose source
 // has a preview image, at most fetch.DefaultConcurrency at a time, and
 // keeps them in chapter order while the book's pictures stay within
-// maxPictureBytes. A picture that fails is skipped. It returns a copy of p
+// maxPictureBytes. A picture that fails, or whose bytes repeat one already
+// kept (a site's generic logo), is skipped. It returns a copy of p
 // with the kept leads' Image set, the pictures, and how many leads had a
 // preview image.
-func (x *run) pictures(p editor.Paper, in editor.Input, images map[string]string) (editor.Paper, []epub.Image, int) {
-	jobs := pictureJobs(p, in, images)
+func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, []epub.Image, int) {
+	jobs := pictureJobs(p, images)
 	if len(jobs) == 0 {
 		return p, nil, 0
 	}
@@ -422,10 +418,13 @@ func (x *run) pictures(p editor.Paper, in editor.Input, images map[string]string
 	out.Chapters = slices.Clone(p.Chapters)
 	var pics []epub.Image
 	total := 0
+	kept := map[[sha256.Size]byte]bool{}
 	for _, j := range jobs {
-		if len(j.data) == 0 || total+len(j.data) > maxPictureBytes {
+		sum := sha256.Sum256(j.data)
+		if len(j.data) == 0 || kept[sum] || total+len(j.data) > maxPictureBytes {
 			continue
 		}
+		kept[sum] = true
 		total += len(j.data)
 		stories := slices.Clone(out.Chapters[j.chapter].Stories)
 		stories[j.story].Image = j.name

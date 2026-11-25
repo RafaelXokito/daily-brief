@@ -134,6 +134,7 @@ func (f *fakeFetch) fetch(_ context.Context, urls []string) map[string]fetch.Art
 type fakePictures struct {
 	mu   sync.Mutex
 	size int
+	same bool // every URL gets the same bytes, like a site's generic logo
 	urls []string
 }
 
@@ -144,7 +145,11 @@ func (f *fakePictures) picture(_ context.Context, url string) ([]byte, error) {
 	if f.size == 0 {
 		return nil, errors.New("no picture")
 	}
-	return append([]byte{0xff, 0xd8, 0xff}, make([]byte, f.size-3)...), nil
+	data := append([]byte{0xff, 0xd8, 0xff}, make([]byte, f.size-3)...)
+	if !f.same {
+		copy(data[3:], url) // distinct bytes per picture
+	}
+	return data, nil
 }
 
 type fakeDeliverer struct {
@@ -951,5 +956,40 @@ func TestRunPictureFailuresAreSkipped(t *testing.T) {
 	}
 	if strings.Contains(string(epubFile(t, book, "EPUB/ch1.xhtml")), "<img") {
 		t.Error("a failed picture left an img element")
+	}
+}
+
+func TestRunSkipsRepeatedPicture(t *testing.T) {
+	e := newRunEnv(t)
+	e.cfg.Topics = []config.Topic{{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"}}
+	e.picture.size, e.picture.same = 50_000, true
+	r, err := e.run(Options{NoDeliver: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := os.ReadFile(r.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := zip.NewReader(bytes.NewReader(book), int64(len(book)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range z.File {
+		if strings.HasPrefix(f.Name, "EPUB/img/") {
+			names = append(names, f.Name)
+		}
+	}
+	if !slices.Equal(names, []string{"EPUB/img/ch1.jpg"}) {
+		t.Errorf("pictures in the book %v, want only ch1.jpg: the same picture is used once", names)
+	}
+	for _, ch := range []string{"ch2", "ch3"} {
+		if strings.Contains(string(epubFile(t, book, "EPUB/"+ch+".xhtml")), "<img") {
+			t.Errorf("%s repeats the picture", ch)
+		}
+	}
+	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "pictures: 1 of 3") {
+		t.Errorf("colophon lacks pictures: 1 of 3\n%s", c)
 	}
 }
