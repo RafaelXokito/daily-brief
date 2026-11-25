@@ -76,3 +76,35 @@ func TestFallbackFrontEmpty(t *testing.T) {
 		t.Errorf("got %+v", f)
 	}
 }
+
+func TestFallbackFrontDropsUnmatchedActHighlight(t *testing.T) {
+	in := fixtureInput()
+	in.Highlights = []brief.Highlight{
+		{Tier: brief.TierAct, Headline: "Nothing like any item", Text: "Orphan."},
+		{Tier: brief.TierAct, Headline: "Third thing", Text: "Patch now."},
+	}
+	f := FallbackFront(in)
+	if len(f.Leads) != 2 || f.Leads[0].ID != "t0i2" || f.Leads[1].ID != "t0i0" {
+		t.Fatalf("leads = %+v", f.Leads)
+	}
+	for _, l := range f.Leads {
+		if l.ID == "" {
+			t.Errorf("lead without ID: %+v", l)
+		}
+	}
+	if f.CoverLine != "Third thing" {
+		t.Errorf("cover = %q", f.CoverLine)
+	}
+	for _, l := range f.InBrief {
+		if l.ID == "t0i2" || l.ID == "t0i0" {
+			t.Errorf("lead repeated in brief: %+v", l)
+		}
+	}
+}
+
+func TestFallbackFrontItemLeadUsesFirstParagraph(t *testing.T) {
+	in := Input{Chapters: []ChapterIn{{Items: []ItemIn{{ID: "t0i0", Headline: "H", Prose: "One.\n\nTwo."}}}}}
+	if f := FallbackFront(in); !reflect.DeepEqual(f.Leads[0].Paragraphs, []string{"One."}) {
+		t.Errorf("paragraphs = %v", f.Leads[0].Paragraphs)
+	}
+}

@@ -63,3 +63,27 @@ func TestBuildInputFailedArticleIsEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildInputTagPlacements(t *testing.T) {
+	tests := []struct {
+		name, md, tag, facts, prose string
+	}{
+		{"tag on headline", "### `ACT` Patch now\nFirst prose line.\nSecond line. [source](https://example.com/a)\n", "ACT", "", "First prose line. Second line."},
+		{"tag without facts", "### Headline\n`WATCH`\nProse here. [source](https://example.com/a)\n", "WATCH", "", "Prose here."},
+		{"tag line without prose", "### Headline\n`FYI` only facts · here [source](https://example.com/a)\n", "FYI", "only facts · here", ""},
+		{"no tag", "### Headline\nProse. [source](https://example.com/a)\n", "", "", "Prose."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := &brief.Journal{Date: "2026-11-25", Sections: []*brief.Section{{Topic: "T", Status: brief.StatusDone, Markdown: tt.md}}}
+			in := BuildInput(j, nil)
+			if len(in.Chapters) != 1 || len(in.Chapters[0].Items) != 1 {
+				t.Fatalf("chapters = %+v", in.Chapters)
+			}
+			it := in.Chapters[0].Items[0]
+			if it.Tag != tt.tag || it.Facts != tt.facts || it.Prose != tt.prose {
+				t.Errorf("got tag %q facts %q prose %q", it.Tag, it.Facts, it.Prose)
+			}
+		})
+	}
+}

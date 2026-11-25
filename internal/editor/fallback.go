@@ -42,22 +42,25 @@ func FallbackFront(in Input) FrontPage {
 		if h.Tier != brief.TierAct || len(fp.Leads) == maxLeads {
 			continue
 		}
-		lead := FrontLead{Headline: plain(h.Headline), Paragraphs: nonEmpty(plain(h.Text), plain(h.Why))}
 		for _, it := range all {
 			if !used[it.ID] && brief.MatchHeadline(it.Headline, h.Headline) {
-				lead.ID, used[it.ID] = it.ID, true
+				used[it.ID] = true
+				fp.Leads = append(fp.Leads, FrontLead{ID: it.ID, Headline: plain(h.Headline), Paragraphs: nonEmpty(plain(h.Text), plain(h.Why))})
+				if fp.CoverLine == "" {
+					fp.CoverLine = plain(h.Headline)
+				}
 				break
 			}
 		}
-		fp.Leads = append(fp.Leads, lead)
 	}
-	if len(fp.Leads) > 0 {
-		fp.CoverLine = fp.Leads[0].Headline
-	}
-	if len(fp.Leads) == 0 {
-		for _, it := range all[:min(maxLeads, len(all))] {
-			fp.Leads = append(fp.Leads, FrontLead{ID: it.ID, Headline: plain(it.Headline), Paragraphs: nonEmpty(plain(it.Prose))})
+	for _, it := range all {
+		if len(fp.Leads) == maxLeads {
+			break
+		}
+		if !used[it.ID] {
 			used[it.ID] = true
+			first, _, _ := strings.Cut(it.Prose, "\n\n")
+			fp.Leads = append(fp.Leads, FrontLead{ID: it.ID, Headline: plain(it.Headline), Paragraphs: nonEmpty(plain(first))})
 		}
 	}
 	if fp.CoverLine == "" && len(fp.Leads) > 0 {
