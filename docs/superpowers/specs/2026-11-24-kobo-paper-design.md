@@ -348,3 +348,12 @@ Asked by Rafael after reading the edition on the Kobo Libra Colour.
 - **Highlights the Kobo shows.** The Kobo's renderer for plain EPUB (Adobe RMSDK) did not show `<mark class="key">` or its background.
   Highlights now render as `<span class="key">`, underlined in the paper's red (#8a1c1c; a renderer that ignores the colour underlines in the text colour), keeping the soft ochre background where it is supported.
   Never bold: the embedded IM Fell fonts have no bold face.
+
+## Revision 2026-11-25 (third): archive instead of delete
+
+Approved by Rafael: old editions are archived, not deleted.
+
+- After a successful upload, each stale edition in the Kobo folder is moved (Dropbox `files/move_v2`) to an archive folder outside it, default `/Daily Brief Archive`, configurable as `paper.dropbox.archive_folder` (absolute path, must not be the Kobo folder or inside it). The Kobo drops the book on its next sync, as with a delete.
+- A name clash in the archive (a same-day rebuild) is resolved by Dropbox autorename.
+- Retention: `paper.dropbox.archive_days` (default 0 = keep everything). When positive, archived editions whose date in the file name is older than that many days are deleted from the archive after the move step. Only files matching daily-brief's own name pattern are ever touched.
+- A failed move or retention delete is a warning, like a failed delete today; the new paper is already delivered.
