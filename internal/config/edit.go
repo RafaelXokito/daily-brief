@@ -57,6 +57,9 @@ var Hints = map[string]string{
 	"mute":                   "optional subjects or keywords to leave out (at most 30, 80 characters each)",
 	"general":                "on: add a World & hot topics section (major world events, trending stories) within the budget",
 	"topics":                 "what to research; edit them in the file",
+	"paper.token_budget":     "tokens one Kobo paper aims to spend; must be positive for `daily-brief paper`",
+	"paper.title":            "the paper's name and file name, default The Daily Brief; no / or \\",
+	"paper.dropbox":          "where the paper is delivered: app_key and folder (default /Apps/Rakuten Kobo); edit them in the file",
 }
 
 // LoadStamped reads the config at path as Load does, without creating it

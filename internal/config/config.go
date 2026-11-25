@@ -107,6 +107,8 @@ type Config struct {
 	// the configured topics. Off by default.
 	General bool    `yaml:"general"`
 	Topics  []Topic `yaml:"topics"`
+	// Paper configures the Kobo edition built by `daily-brief paper`.
+	Paper Paper `yaml:"paper,omitempty"`
 	// AllTopics are the effective topics (see EffectiveTopics: the
 	// configured ones, then the World section when general is on) when
 	// FilterTopics kept only some of them; a run over the subset is merged
@@ -362,6 +364,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config: theme must be auto, dark or light, not %q", c.Theme)
 	}
 	if err := c.Provider.Validate(); err != nil {
+		return err
+	}
+	if err := c.Paper.Validate(); err != nil {
 		return err
 	}
 	// Only the section general adds may take its name, whether or not
