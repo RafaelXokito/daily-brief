@@ -325,3 +325,13 @@ Rafael read the first edition built on the home server and asked for four change
 - **A reading flow for The Day in Brief.** Leads first (headline, standfirst, two short paragraphs, "continued in Of <Topic>" link), separated by ⁂. Then an "In Brief" section grouped under small-caps topic headings in chapter order, a thin rule between topics, each line linking to its story.
 - **Images, few and small.** One picture per chapter, for its lead story only, from the article's own preview image (og:image or what the extractor reports), fetched with the same public-only guard and size caps as articles. Scaled to at most 800 px wide, JPEG, about 60 KB each, total capped at 1 MB per book. No picture when there is none or it cannot be fetched safely. No images on the front page.
   This supersedes the non-goal "images from source articles" for chapter lead stories only.
+
+## Revision 2026-11-25 (second): front page pictures, In Brief paragraphs, picture intent, highlights
+
+Approved by Rafael after reading the second edition.
+
+- **Front page lead pictures.** Each front-page lead shows its story's picture under the headline; the first lead's picture is full width (the main photo), the others smaller. A picture already used in a chapter is reused (same file); otherwise the lead's article preview is fetched with the existing guard.
+- **In Brief as paragraphs.** For each topic the front pass writes two to four flowing sentences covering the highlights; each sentence links to its story and is fact-checked against that story, item and article. The mechanical fallback joins the headlines of that topic's stories into one paragraph, each linked.
+- **In Brief topic titles** use the chapter-opener style: a larger italic "Of <Topic>" with a small fleuron, not small caps.
+- **Pictures where the text needs them.** The chapter pass may mark a story `needs_picture` when an image helps understanding (a device, a map, a spacecraft, a route, a chart). Such stories get their article's preview picture in the chapter. At most 6 such extra pictures per book. Priority when the budget runs out: front leads, chapter leads, then `needs_picture` stories in chapter order. The per-book picture cap rises from 1 MB to 1.5 MB.
+- **Highlights.** The chapter pass may mark at most two short phrases per story (each at most 12 words) as highlights, written as `==phrase==` inside a paragraph. They render as `<mark class="key">` with a soft muted ochre background. Marks are stripped before fact checks; malformed, nested, over-long or excess marks are dropped and the plain text kept. Fallback stories have none. No highlights on the front page.
