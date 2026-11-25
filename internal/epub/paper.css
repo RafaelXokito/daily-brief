@@ -20,7 +20,10 @@ h3.story { font-family: "Fell SC", serif; font-weight: normal; font-size: 1.05em
 .standfirst { font-style: italic; font-size: 0.95em; margin-bottom: 0.4em; text-align: left; }
 .dateline { font-family: "Fell SC", serif; font-size: 0.85em; letter-spacing: 0.1em; margin-bottom: 0.3em; text-align: left; }
 .drop { float: left; font-family: "Fell SC", serif; font-size: 3.2em; line-height: 0.8; padding: 0.08em 0.1em 0 0; color: #2f5a3a; }
-.srcline { text-align: right; font-style: italic; font-size: 0.85em; }
+.source { text-align: right; font-style: italic; font-size: 0.85em; }
+.continued { font-style: italic; font-size: 0.9em; text-align: right; }
+h3.topic-head { font-family: "Fell SC", serif; font-weight: normal; font-size: 0.95em; letter-spacing: 0.1em; color: #2f5a3a; margin: 0.8em 0 0.3em 0; text-align: left; }
+hr.topic-rule { border: 0; border-top: 1px solid #2a2318; width: 30%; margin: 0.9em auto; }
 .sep { text-align: center; color: #2f5a3a; margin: 1em 0; }
 .hl { text-indent: 0; }
 .center { text-align: center; }

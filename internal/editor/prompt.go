@@ -31,7 +31,7 @@ const frontSystem = `You are the front page editor of a morning newspaper. You a
 
 Rules:
 - Write in modern newspaper English. Put the most important fact first. No fragments and no "·" lists.
-- Choose two or three lead stories. For each, write a headline and the opening paragraphs, using only the story's own text.
+- Choose two or three lead stories. For each, write a headline and two short opening paragraphs, using only the story's own text.
 - Write one sentence for each remaining story for "the day in brief".
 - Write one italic cover line for the day's lead story.
 - Do not add facts, numbers, versions, names, places, dates or claims that are not in the text you were given. Keep the stories' hedges, and where texts disagree, say so.

@@ -23,15 +23,17 @@ func FallbackStory(it ItemIn, placement string) Story {
 	}
 	return Story{
 		ID: it.ID, Headline: plain(it.Headline), Standfirst: plain(it.Facts),
-		Paragraphs: paras, Placement: placement, Host: it.Host, Tag: it.Tag, Fallback: true,
+		Paragraphs: paras, Placement: placement, Host: it.Host, Tag: it.Tag, URL: it.URL, Fallback: true,
 	}
 }
 
 // FallbackFront builds the front page without the model. Leads are the
 // first two "act" highlights, else the first two items; In Brief is every
 // other item's headline; the cover line is the first "act" headline, else
-// the first lead's.
+// the first lead's. Chapters kept off the front page, and the highlights
+// about their stories, are left out.
 func FallbackFront(in Input) FrontPage {
+	in = frontOnly(in)
 	var all []ItemIn
 	for _, c := range in.Chapters {
 		all = append(all, c.Items...)

@@ -86,10 +86,10 @@ func TestRenderStructure(t *testing.T) {
 		strings.Index(ch1, "In Brief") < strings.Index(ch1, "Build tool gains") {
 		t.Errorf("In Brief heading is not between the stories and the brief notes")
 	}
-	if n, want := strings.Count(ch1, `<p class="srcline">From example.com</p>`), 2; n != want {
+	if n, want := strings.Count(ch1, `<p class="source">From example.com</p>`), 2; n != want {
 		t.Errorf("chapter one has %d 'From example.com' lines, want %d", n, want)
 	}
-	if !strings.Contains(ch1, `<p class="srcline">From example.org</p>`) {
+	if !strings.Contains(ch1, `<p class="source">From example.org</p>`) {
 		t.Errorf("brief note lacks its source line")
 	}
 	if !strings.Contains(chs[2].Body, `<p class="chap">Chapter the Second</p>`) || !strings.Contains(chs[2].Body, "<h1>Of Security</h1>") {
@@ -183,8 +183,8 @@ func TestRenderLinksResolve(t *testing.T) {
 			}
 		}
 	}
-	if links != 4 {
-		t.Errorf("found %d internal links, want 4 (two leads, two In Brief lines)", links)
+	if links != 6 {
+		t.Errorf("found %d internal links, want 6 (two leads, their two continued lines, two In Brief lines)", links)
 	}
 }
 
@@ -300,4 +300,80 @@ func TestRenderSanitisedIDCollisionLinksTheRightStory(t *testing.T) {
 			t.Errorf("front lacks %s\n%s", want, front)
 		}
 	}
+}
+
+func TestRenderSourceLine(t *testing.T) {
+	p := samplePaper()
+	p.Chapters[0].Stories[0].URL = "https://example.com/a?x=1&y=2"
+	p.Chapters[0].Stories[2].Host = ""
+	chs := Render(p, sampleMeta())
+	ch1 := chs[1].Body
+
+	want := `<p class="source"><a href="https://example.com/a?x=1&amp;y=2">[source]</a> From example.com</p>`
+	if !strings.Contains(ch1, want) {
+		t.Errorf("lead lacks %s\n%s", want, ch1)
+	}
+	lead := ch1[strings.Index(ch1, `id="t0i0"`):strings.Index(ch1, `<p class="sep">`)]
+	if !strings.HasSuffix(strings.TrimSpace(lead), want) {
+		t.Errorf("the source line does not end the story:\n%s", lead)
+	}
+	if !strings.Contains(ch1, `<p class="source">From example.com</p>`) {
+		t.Errorf("a story without a URL lacks its plain source line:\n%s", ch1)
+	}
+	if n := strings.Count(ch1, `class="source"`); n != 2 {
+		t.Errorf("chapter one has %d source lines, want 2 (the brief note has neither URL nor host)", n)
+	}
+	if n := strings.Count(ch1, "[source]"); n != 1 {
+		t.Errorf("chapter one has %d [source] links, want 1", n)
+	}
+	if strings.Contains(chs[0].Body, "[source]") {
+		t.Errorf("the front page carries a [source] link:\n%s", chs[0].Body)
+	}
+	assertXML(t, "ch1", ch1)
+}
+
+func TestRenderFrontLayout(t *testing.T) {
+	p := samplePaper()
+	// Two In Brief lines from the first chapter, one from the second,
+	// listed out of chapter order.
+	p.Front.InBrief = []editor.FrontLine{
+		{ID: "t1i1", Sentence: "A password manager changed its pricing."},
+		{ID: "t0i1", Sentence: "A build tool gained a faster cache."},
+		{ID: "t0i2", Sentence: "Conference dates were announced."},
+	}
+	chs := Render(p, sampleMeta())
+	front := chs[0].Body
+
+	for _, want := range []string{
+		`<p class="standfirst">Fewer features, more fixes</p>`,
+		`<p class="continued"><a href="ch1.xhtml#t0i0">continued in Of Java &amp; Quarkus</a></p>`,
+		`<p class="continued"><a href="ch2.xhtml#t1i0">continued in Of Security</a></p>`,
+		`<h2 class="tier">In Brief</h2>`,
+		`<h3 class="topic-head">Java &amp; Quarkus</h3>`,
+		`<h3 class="topic-head">Security</h3>`,
+		`<hr class="topic-rule"/>`,
+	} {
+		if !strings.Contains(front, want) {
+			t.Errorf("front page lacks %s\n%s", want, front)
+		}
+	}
+	if n := strings.Count(front, "⁂"); n != 1 {
+		t.Errorf("front page has %d ⁂, want 1 between its two leads", n)
+	}
+	if n := strings.Count(front, `class="topic-rule"`); n != 1 {
+		t.Errorf("front page has %d topic rules, want 1 between its two groups", n)
+	}
+	order := []string{
+		"Framework ships a quieter release", "continued in Of Java", "⁂", "Patch the gateway today", "continued in Of Security",
+		"In Brief", `topic-head">Java`, "A build tool gained", "Conference dates", "topic-rule", `topic-head">Security`, "A password manager",
+	}
+	last := -1
+	for _, s := range order {
+		i := strings.Index(front, s)
+		if i <= last {
+			t.Fatalf("%q is out of place on the front page:\n%s", s, front)
+		}
+		last = i
+	}
+	assertXML(t, "front", front)
 }

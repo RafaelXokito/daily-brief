@@ -722,6 +722,8 @@ Each morning the command researches your topics, fetches the source articles, wr
 The book has a cover, a front page ("The Day in Brief"), one chapter per topic and a colophon, and each chapter is an entry in the Kobo's table of contents.
 Where a source article could be fetched, the story is a long summary of it, so the paper reads well offline without carrying whole articles.
 Stories without a usable source are written from the research digest alone.
+Each story ends with a `[source]` link to the article it summarises (only http and https links), followed by "From <site>".
+The front page has the day's two or three biggest stories first, each with a "continued in" link to its chapter, then "In Brief": one line per other story, grouped under its topic in chapter order.
 Only today's paper stays on the Kobo: after a successful upload, older editions that daily-brief created are deleted from Dropbox, and the Kobo drops them on its next sync.
 
 The server keeps its own config, topics and journals, separate from your laptop's.
@@ -746,6 +748,18 @@ The title is used in the file name, so it cannot contain a slash or control char
 The folder must be an absolute Dropbox path.
 
 The Dropbox refresh token is never stored in `config.yaml`.
+
+A topic can stay off the front page, for example a work topic you read in its own chapter:
+
+```yaml
+topics:
+  - name: Dev & Security
+    focus: ...
+    front_page: false   # optional, default true
+```
+
+Its stories, urgent ones included, then appear only in its own chapter, and its highlights are not used for the front page.
+The World & hot topics section is always on the front page.
 
 ### Creating the Dropbox app
 

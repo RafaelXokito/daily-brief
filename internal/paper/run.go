@@ -201,7 +201,7 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	if j == nil {
 		return nil, ErrNoStories
 	}
-	in := editor.BuildInput(j, nil)
+	in := editor.BuildInput(j, nil, onFront(x.cfg.EffectiveTopics()))
 	if len(in.Chapters) == 0 {
 		return nil, ErrNoStories
 	}
@@ -323,9 +323,23 @@ func (x *run) withArticles(in editor.Input) editor.Input {
 			it.Article = texts[it.URL]
 			items[k] = it
 		}
-		out.Chapters[i] = editor.ChapterIn{Topic: c.Topic, Items: items}
+		c.Items = items
+		out.Chapters[i] = c
 	}
 	return out
+}
+
+// onFront reports whether a topic's stories may reach the front page: all
+// but those of a configured topic set to front_page: false.
+func onFront(topics []config.Topic) func(string) bool {
+	return func(topic string) bool {
+		for _, t := range topics {
+			if strings.EqualFold(strings.TrimSpace(t.Name), strings.TrimSpace(topic)) {
+				return t.OnFrontPage()
+			}
+		}
+		return true
+	}
 }
 
 // cut names the topics that failed or were cut by the budget.

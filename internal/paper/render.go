@@ -35,20 +35,37 @@ var tmpl = template.Must(template.New("").ParseFS(templateFS, "templates/*.xhtml
 var ordinals = []string{"First", "Second", "Third", "Fourth", "Fifth", "Sixth",
 	"Seventh", "Eighth", "Ninth", "Tenth", "Eleventh", "Twelfth"}
 
+// frontEntry is a lead or an In Brief line. A lead also carries its
+// story's standfirst and the title of the chapter it continues in.
 type frontEntry struct {
-	Href, Text string
-	Paragraphs []string
-	Act        bool
+	Href, Text, Standfirst, Continued string
+	Paragraphs                        []string
+	Act                               bool
+}
+
+// frontGroup is a topic's In Brief lines; Topic is "" for lines whose
+// story is not in the book.
+type frontGroup struct {
+	Topic string
+	Lines []frontEntry
+}
+
+// placed is what the front page needs from a story in its chapter.
+type placed struct {
+	chapter            int // index among the rendered chapters
+	topic, title, lead string
+	act                bool
 }
 
 // storyView is a story ready for the template. A lead's first paragraph,
 // when it starts with a letter or digit, is split into DropCap and
-// DropRest and left out of Paragraphs.
+// DropRest and left out of Paragraphs. URL is the source link, "" unless
+// http(s).
 type storyView struct {
-	ID, Headline, Standfirst, Dateline, Host string
-	DropCap, DropRest                        string
-	Paragraphs                               []string
-	Act                                      bool
+	ID, Headline, Standfirst, Dateline, Host, URL string
+	DropCap, DropRest                             string
+	Paragraphs                                    []string
+	Act                                           bool
 }
 
 type chapterView struct {
@@ -66,7 +83,7 @@ type colophonView struct {
 // stripped of control and invisible characters and escaped.
 func Render(p editor.Paper, m Meta) []epub.Chapter {
 	reg := newIDs()
-	acts := map[string]bool{} // raw story id -> tagged ACT
+	stories := map[string]placed{} // raw story id -> its first placement
 	var chapters []epub.Chapter
 	for _, c := range p.Chapters {
 		if len(c.Stories) == 0 {
@@ -80,11 +97,11 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 		for _, s := range orderStories(c.Stories) {
 			sv := storyView{
 				ID: reg.add(s.ID, file), Headline: clean(s.Headline), Standfirst: clean(s.Standfirst),
-				Dateline: clean(s.Dateline), Host: clean(s.Host), Paragraphs: cleanAll(s.Paragraphs),
+				Dateline: clean(s.Dateline), Host: clean(s.Host), URL: sourceURL(s.URL), Paragraphs: cleanAll(s.Paragraphs),
 				Act: s.Tag == "ACT",
 			}
-			if _, seen := acts[s.ID]; !seen {
-				acts[s.ID] = sv.Act
+			if _, seen := stories[s.ID]; !seen {
+				stories[s.ID] = placed{chapter: n - 1, topic: titleCase(clean(c.Topic)), title: title, lead: sv.Standfirst, act: sv.Act}
 			}
 			if s.Placement == "lead" && len(sv.Paragraphs) > 0 {
 				if c, rest := dropCap(sv.Paragraphs[0]); c != "" {
@@ -99,16 +116,52 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 		}
 		chapters = append(chapters, epub.Chapter{File: file, TOCTitle: short + ": " + title, Body: execute("chapter.xhtml", v)})
 	}
-	front := struct{ Leads, InBrief []frontEntry }{}
-	for _, l := range p.Front.Leads {
-		front.Leads = append(front.Leads, frontEntry{Href: reg.href[l.ID], Text: clean(l.Headline), Paragraphs: cleanAll(l.Paragraphs), Act: acts[l.ID]})
-	}
-	for _, l := range p.Front.InBrief {
-		front.InBrief = append(front.InBrief, frontEntry{Href: reg.href[l.ID], Text: clean(l.Sentence), Act: acts[l.ID]})
-	}
-	out := []epub.Chapter{{File: "front.xhtml", TOCTitle: "The Day in Brief", Body: execute("front.xhtml", front)}}
+	out := []epub.Chapter{{File: "front.xhtml", TOCTitle: "The Day in Brief", Body: execute("front.xhtml", frontView(p.Front, reg, stories, len(chapters)))}}
 	out = append(out, chapters...)
 	return append(out, epub.Chapter{File: "colophon.xhtml", TOCTitle: "Colophon", Body: execute("colophon.xhtml", colophon(p, m))})
+}
+
+type frontPageView struct {
+	Leads   []frontEntry
+	InBrief []frontGroup
+}
+
+// frontView lays out the front page: the leads in the editor's order, then
+// the In Brief lines grouped by their story's chapter in chapter order,
+// keeping the editor's order within a group, and last the lines whose
+// story is not in the book.
+func frontView(fp editor.FrontPage, reg ids, stories map[string]placed, chapters int) frontPageView {
+	var v frontPageView
+	for _, l := range fp.Leads {
+		s := stories[l.ID]
+		v.Leads = append(v.Leads, frontEntry{Href: reg.href[l.ID], Text: clean(l.Headline), Standfirst: s.lead,
+			Continued: s.title, Paragraphs: cleanAll(l.Paragraphs), Act: s.act})
+	}
+	groups := make([]frontGroup, chapters+1)
+	for _, l := range fp.InBrief {
+		g := chapters
+		s, ok := stories[l.ID]
+		if ok {
+			g = s.chapter
+			groups[g].Topic = s.topic
+		}
+		groups[g].Lines = append(groups[g].Lines, frontEntry{Href: reg.href[l.ID], Text: clean(l.Sentence), Act: s.act})
+	}
+	for _, g := range groups {
+		if len(g.Lines) > 0 {
+			v.InBrief = append(v.InBrief, g)
+		}
+	}
+	return v
+}
+
+// sourceURL is raw as a link target when it is an http(s) URL, else "".
+func sourceURL(raw string) string {
+	u, ok := brief.SafeWebURL(raw)
+	if !ok {
+		return ""
+	}
+	return u
 }
 
 func colophon(p editor.Paper, m Meta) colophonView {

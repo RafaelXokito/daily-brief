@@ -3,7 +3,7 @@
 {{end}}{{if .Dateline}}<p class="dateline">{{.Dateline}}</p>
 {{end}}{{if .DropCap}}<p><span class="drop">{{.DropCap}}</span>{{.DropRest}}</p>
 {{end}}{{range .Paragraphs}}<p>{{.}}</p>
-{{end}}{{if .Host}}<p class="srcline">From {{.Host}}</p>
+{{end}}{{if or .URL .Host}}<p class="source">{{if .URL}}<a href="{{.URL}}">[source]</a>{{if .Host}} {{end}}{{end}}{{if .Host}}From {{.Host}}{{end}}</p>
 {{end}}{{end -}}
 <p class="chap">{{.Heading}}</p>
 <h1>{{.Title}}</h1>

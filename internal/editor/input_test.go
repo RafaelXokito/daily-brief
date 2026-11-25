@@ -23,7 +23,7 @@ func fixtureJournal() *brief.Journal {
 }
 
 func TestBuildInputSplitsItem(t *testing.T) {
-	in := BuildInput(fixtureJournal(), map[string]fetch.Article{"https://example.com/a": {Text: "Body.", Words: 400}})
+	in := BuildInput(fixtureJournal(), map[string]fetch.Article{"https://example.com/a": {Text: "Body.", Words: 400}}, nil)
 	it := in.Chapters[0].Items[0]
 	want := ItemIn{
 		ID: "t0i0", Headline: "Widget server flaw exploited", Tag: "WATCH", Facts: "facts · more facts",
@@ -42,7 +42,7 @@ func TestBuildInputSplitsItem(t *testing.T) {
 }
 
 func TestBuildInputSkipsNonDoneSections(t *testing.T) {
-	in := BuildInput(fixtureJournal(), nil)
+	in := BuildInput(fixtureJournal(), nil, nil)
 	if len(in.Chapters) != 2 || in.Chapters[0].Topic != "Security" || in.Chapters[1].Topic != "World" {
 		t.Fatalf("chapters = %+v", in.Chapters)
 	}
@@ -56,7 +56,7 @@ func TestBuildInputFailedArticleIsEmpty(t *testing.T) {
 		"https://example.com/a": {Err: fetch.ErrTooShort, Text: "leftover"},
 		"https://example.net/b": {},
 	}
-	in := BuildInput(fixtureJournal(), arts)
+	in := BuildInput(fixtureJournal(), arts, nil)
 	for _, it := range in.Chapters[0].Items {
 		if it.Article != "" {
 			t.Errorf("%s article = %q, want empty", it.ID, it.Article)
@@ -76,7 +76,7 @@ func TestBuildInputTagPlacements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			j := &brief.Journal{Date: "2026-11-25", Sections: []*brief.Section{{Topic: "T", Status: brief.StatusDone, Markdown: tt.md}}}
-			in := BuildInput(j, nil)
+			in := BuildInput(j, nil, nil)
 			if len(in.Chapters) != 1 || len(in.Chapters[0].Items) != 1 {
 				t.Fatalf("chapters = %+v", in.Chapters)
 			}

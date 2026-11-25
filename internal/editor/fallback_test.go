@@ -29,11 +29,11 @@ func TestFallbackStoryNoProse(t *testing.T) {
 
 func fixtureInput() Input {
 	return Input{
-		Chapters: []ChapterIn{{Topic: "A", Items: []ItemIn{
+		Chapters: []ChapterIn{{Topic: "A", FrontPage: true, Items: []ItemIn{
 			{ID: "t0i0", Headline: "First flaw patched", Prose: "p0"},
 			{ID: "t0i1", Headline: "Second thing", Prose: "p1"},
 			{ID: "t0i2", Headline: "Third thing", Prose: "p2"},
-		}}, {Topic: "B", Items: []ItemIn{{ID: "t1i0", Headline: "Fourth thing"}}}},
+		}}, {Topic: "B", FrontPage: true, Items: []ItemIn{{ID: "t1i0", Headline: "Fourth thing"}}}},
 	}
 }
 
@@ -103,7 +103,7 @@ func TestFallbackFrontDropsUnmatchedActHighlight(t *testing.T) {
 }
 
 func TestFallbackFrontItemLeadUsesFirstParagraph(t *testing.T) {
-	in := Input{Chapters: []ChapterIn{{Items: []ItemIn{{ID: "t0i0", Headline: "H", Prose: "One.\n\nTwo."}}}}}
+	in := Input{Chapters: []ChapterIn{{FrontPage: true, Items: []ItemIn{{ID: "t0i0", Headline: "H", Prose: "One.\n\nTwo."}}}}}
 	if f := FallbackFront(in); !reflect.DeepEqual(f.Leads[0].Paragraphs, []string{"One."}) {
 		t.Errorf("paragraphs = %v", f.Leads[0].Paragraphs)
 	}

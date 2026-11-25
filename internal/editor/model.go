@@ -12,10 +12,12 @@ type ItemIn struct {
 	ID, Headline, Tag, Facts, Prose, Host, URL, Article string
 }
 
-// ChapterIn is one topic's items.
+// ChapterIn is one topic's items. FrontPage false keeps the chapter's
+// stories off the front page.
 type ChapterIn struct {
-	Topic string
-	Items []ItemIn
+	Topic     string
+	Items     []ItemIn
+	FrontPage bool
 }
 
 // Input is everything the editor works from.
@@ -34,6 +36,8 @@ type Story struct {
 	// Tag is the item's tag: "ACT", "WATCH", "FYI" or "" when untagged.
 	Tag      string
 	Fallback bool
+	// URL is the item's source, never the model's.
+	URL string
 }
 
 // Chapter is a topic's stories.

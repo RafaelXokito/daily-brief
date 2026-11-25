@@ -349,3 +349,33 @@ func TestUpdateCheckDefaultsOn(t *testing.T) {
 		t.Error("Clone shares update_check")
 	}
 }
+
+// front_page is unset (on) by default; false keeps a topic off the paper's
+// front page and survives a save.
+func TestTopicOnFrontPageDefault(t *testing.T) {
+	cfg, err := loadYAML(t, "topics:\n  - name: A\n  - name: Work\n    front_page: false\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Topics[0].OnFrontPage() || cfg.Topics[0].FrontPage != nil {
+		t.Errorf("topic without front_page: %+v, want on and unset", cfg.Topics[0])
+	}
+	if cfg.Topics[1].OnFrontPage() {
+		t.Errorf("front_page: false topic is on the front page")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), "front_page: false"); n != 1 {
+		t.Errorf("saved config has front_page: false %d times, want once:\n%s", n, data)
+	}
+	again, _, err := Load(path)
+	if err != nil || !again.Topics[0].OnFrontPage() || again.Topics[1].OnFrontPage() {
+		t.Fatalf("round trip: %+v, %v", again.Topics, err)
+	}
+}

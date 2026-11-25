@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"io"
+	"net/url"
 	"strings"
 	"testing"
 	"unicode"
@@ -123,5 +124,72 @@ func TestRenderHostileBookRoundTrip(t *testing.T) {
 	// container, OPF, NCX, nav, cover, front, two chapters, colophon.
 	if checked != 9 {
 		t.Errorf("checked %d XML files, want 9", checked)
+	}
+}
+
+func TestRenderSourceURLEscaping(t *testing.T) {
+	for _, tc := range []struct {
+		name, url string
+		link      bool
+	}{
+		{"ampersand quote and space", `https://example.com/a b?q="x"&y=1 2`, true},
+		{"javascript", "javascript:alert(1)", false},
+		{"data", "data:text/html,<b>x</b>", false},
+		{"no scheme", "example.com/a", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := samplePaper()
+			p.Chapters[0].Stories[0].URL = tc.url
+			ch1 := Render(p, sampleMeta())[1].Body
+			assertXML(t, "ch1", ch1)
+
+			href, found := sourceHref(t, ch1)
+			if found != tc.link {
+				t.Fatalf("[source] link present = %v, want %v:\n%s", found, tc.link, ch1)
+			}
+			if !tc.link {
+				if strings.Contains(ch1, "javascript") || strings.Contains(ch1, "data:") {
+					t.Errorf("unsafe URL leaked into the page:\n%s", ch1)
+				}
+				return
+			}
+			u, err := url.Parse(href)
+			if err != nil || u.Scheme != "https" || u.Host != "example.com" || strings.ContainsAny(href, ` "<>`) {
+				t.Fatalf("href %q does not resolve to the article (%v)", href, err)
+			}
+			if u.Path != "/a b" || u.Query().Get("q") != `"x"` || u.Query().Get("y") != "1 2" {
+				t.Errorf("href %q lost the URL: path %q query %v", href, u.Path, u.Query())
+			}
+		})
+	}
+}
+
+// sourceHref is the decoded href of the [source] link in body, if any.
+func sourceHref(t *testing.T, body string) (string, bool) {
+	t.Helper()
+	d := xml.NewDecoder(strings.NewReader("<body>" + body + "</body>"))
+	d.Strict = true
+	var href string
+	for {
+		tok, err := d.Token()
+		if err == io.EOF {
+			return "", false
+		}
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		switch el := tok.(type) {
+		case xml.StartElement:
+			href = ""
+			for _, a := range el.Attr {
+				if el.Name.Local == "a" && a.Name.Local == "href" {
+					href = a.Value
+				}
+			}
+		case xml.CharData:
+			if string(el) == "[source]" && href != "" {
+				return href, true
+			}
+		}
 	}
 }

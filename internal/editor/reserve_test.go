@@ -20,7 +20,7 @@ func words(n int) string {
 func worstInput(chapters, perChapter int) Input {
 	in := Input{Date: time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC)}
 	for c := range chapters {
-		ch := ChapterIn{Topic: fmt.Sprintf("Topic %d", c)}
+		ch := ChapterIn{Topic: fmt.Sprintf("Topic %d", c), FrontPage: true}
 		for i := range perChapter {
 			ch.Items = append(ch.Items, ItemIn{
 				ID: fmt.Sprintf("t%di%d", c, i), Headline: words(14), Tag: "WATCH", Facts: words(30),

@@ -185,7 +185,8 @@ func editChapter(ctx context.Context, b brief.Backend, p *pool, c ChapterIn) Cha
 // concurrency at a time, then the front page from the edited chapters. A pass
 // starts only if its planned cost plus margin fits what is left of the
 // budget; otherwise, or when its reply is unusable, the mechanical fallback
-// takes its place.
+// takes its place. Chapters kept off the front page are edited as usual but
+// never offered to, nor accepted from, the front page pass.
 func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurrency int) Paper {
 	if concurrency < 1 {
 		concurrency = 1
@@ -193,11 +194,12 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 	p := &pool{remaining: budget.Tokens, marginPct: max(budget.MarginPct, 0)}
 	// The front page is the most visible page: set its estimated cost aside
 	// before the chapters can use the budget up.
+	frontIn := frontOnly(in)
 	var asFallback []Chapter
-	for _, c := range in.Chapters {
+	for _, c := range frontIn.Chapters {
 		asFallback = append(asFallback, fallbackChapter(c))
 	}
-	fs, fi := frontPrompt(in, asFallback)
+	fs, fi := frontPrompt(frontIn, asFallback)
 	p.reserve(withMargin(newPlan(fs, fi, frontOutput).planned, p.marginPct))
 	chapters := make([]Chapter, len(in.Chapters))
 	sem := make(chan struct{}, concurrency)
@@ -215,10 +217,10 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 
 	p.release()
 	front, frontFellBack := FallbackFront(in), true
-	if ctx.Err() == nil {
-		system, input := frontPrompt(in, chapters)
+	if onFront := frontChapters(in, chapters); ctx.Err() == nil && len(onFront) > 0 {
+		system, input := frontPrompt(frontIn, onFront)
 		if reply, ok := p.pass(ctx, b, newPlan(system, input, frontOutput)); ok {
-			if fp, err := parseFront(reply, chapters); err == nil && checkFront(fp, chapters, itemsByID(in)) {
+			if fp, err := parseFront(reply, onFront); err == nil && checkFront(fp, onFront, itemsByID(in)) {
 				front, frontFellBack = fp, false
 			}
 		}

@@ -5,7 +5,11 @@
 {{range $i, $l := .Leads}}{{if $i}}<p class="sep">⁂</p>
 {{end}}<h2 class="story">{{template "link" $l}}</h2>
 {{if .Act}}<p class="tag act">Act now</p>
+{{end}}{{if .Standfirst}}<p class="standfirst">{{.Standfirst}}</p>
 {{end}}{{range .Paragraphs}}<p>{{.}}</p>
+{{end}}{{if .Href}}<p class="continued"><a href="{{.Href}}">continued in {{.Continued}}</a></p>
 {{end}}{{end}}{{if .InBrief}}<h2 class="tier">In Brief</h2>
-{{range .InBrief}}<p class="hl">{{if .Act}}<span class="tag act">Act now.</span> {{end}}{{template "link" .}}</p>
-{{end}}{{end}}
+{{range $i, $g := .InBrief}}{{if $i}}<hr class="topic-rule"/>
+{{end}}{{if .Topic}}<h3 class="topic-head">{{.Topic}}</h3>
+{{end}}{{range .Lines}}<p class="hl">{{if .Act}}<span class="tag act">Act now.</span> {{end}}{{template "link" .}}</p>
+{{end}}{{end}}{{end}}

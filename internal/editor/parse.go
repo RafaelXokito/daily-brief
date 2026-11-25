@@ -77,7 +77,7 @@ func cleanParagraphs(ps []string) []string {
 }
 
 // parseChapter reads the editor's reply for one chapter. Every item must
-// appear exactly once; Host and Tag come from the item, not the model.
+// appear exactly once; Host, Tag and URL come from the item, not the model.
 func parseChapter(reply string, c ChapterIn) (Chapter, error) {
 	raw, err := decodeObject(reply, func(r chapterJSON) bool { return len(r.Stories) > 0 })
 	if err != nil {
@@ -112,7 +112,7 @@ func parseChapter(reply string, c ChapterIn) (Chapter, error) {
 		ch.Stories = append(ch.Stories, Story{
 			ID: sj.ID, Headline: strings.TrimSpace(sj.Headline), Standfirst: strings.TrimSpace(sj.Standfirst),
 			Dateline: strings.TrimSpace(sj.Dateline), Paragraphs: paras, Placement: sj.Placement,
-			Host: it.Host, Tag: it.Tag,
+			Host: it.Host, Tag: it.Tag, URL: it.URL,
 		})
 	}
 	for _, it := range c.Items {

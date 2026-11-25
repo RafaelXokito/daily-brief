@@ -842,3 +842,26 @@ func TestRunResearchOvershootWarningNamesShare(t *testing.T) {
 		t.Errorf("log: %s", log)
 	}
 }
+
+// A topic set to front_page: false reaches the editor as a chapter kept off
+// the front page, after the articles are fetched.
+func TestRunPassesFrontPageChoice(t *testing.T) {
+	e := newRunEnv(t)
+	off := false
+	e.cfg.Topics[1].FrontPage = &off
+	var got []editor.ChapterIn
+	orig := runEditor
+	runEditor = func(ctx context.Context, b brief.Backend, in editor.Input, budget editor.Budget, n int) editor.Paper {
+		got = in.Chapters
+		return orig(ctx, b, in, budget, n)
+	}
+	defer func() { runEditor = orig }()
+
+	if _, err := e.run(Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 2 || got[0].Topic != "Alpha" || !got[0].FrontPage || got[1].Topic != "Beta" || got[1].FrontPage {
+		t.Fatalf("chapters = %+v, want Alpha on and Beta off the front page", got)
+	}
+}

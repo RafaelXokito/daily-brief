@@ -21,6 +21,9 @@ type Topic struct {
 	Focus string `yaml:"focus"`
 	// Weight scales this topic's share of the token budget (default 1).
 	Weight float64 `yaml:"weight,omitempty"`
+	// FrontPage false keeps the topic's stories off the paper's front page,
+	// in their own chapter only. Unset (nil) means on; use OnFrontPage.
+	FrontPage *bool `yaml:"front_page,omitempty"`
 	// world marks the section general adds (see WorldTopic), never a
 	// configured topic, even one that takes its name.
 	world bool
@@ -209,6 +212,7 @@ func marshal(cfg Config) ([]byte, error) {
 		"#               header; `daily-brief update` installs it) or false (never check).\n" +
 		"# price_*: USD prices used only to estimate the cost of API runs.\n" +
 		"# weight: optional per-topic multiplier for its share of the budget.\n" +
+		"# front_page: optional per-topic; false keeps the topic's stories off the Kobo paper's front page.\n" +
 		"# profile: optional, about you (at most 500 characters): items that affect it rank higher and say how, e.g.\n" +
 		"#          profile: \"Java 21, Quarkus 3.x, Hibernate, Kafka; EU ETF investor\"\n" +
 		"# mute: optional subjects or keywords to leave out (at most 30, 80 characters each), e.g.\n" +
@@ -265,6 +269,12 @@ func (c *Config) Clean() {
 		// An unset (or null) update_check is on.
 		c.UpdateCheck = new(true)
 	}
+}
+
+// OnFrontPage reports whether the topic's stories may reach the paper's
+// front page: true unless front_page is false.
+func (t Topic) OnFrontPage() bool {
+	return t.FrontPage == nil || *t.FrontPage
 }
 
 // MouseOn reports whether the TUI takes the mouse: true unless mouse is

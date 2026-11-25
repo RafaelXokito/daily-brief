@@ -51,11 +51,11 @@ func runInput() Input {
 	return Input{
 		Date: time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC),
 		Chapters: []ChapterIn{
-			{Topic: "Alpha", Items: []ItemIn{
+			{Topic: "Alpha", FrontPage: true, Items: []ItemIn{
 				{ID: "t0i0", Headline: "Alpha one", Facts: "fact a", Prose: "Prose a.", Host: "a.example"},
 				{ID: "t0i1", Headline: "Alpha two", Facts: "fact b", Prose: "Prose b.", Host: "a.example"},
 			}},
-			{Topic: "Beta", Items: []ItemIn{
+			{Topic: "Beta", FrontPage: true, Items: []ItemIn{
 				{ID: "t1i0", Headline: "Beta one", Facts: "fact c", Prose: "Prose c.", Host: "b.example"},
 			}},
 		},

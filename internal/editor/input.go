@@ -11,14 +11,16 @@ import (
 
 // BuildInput reads the journal's done sections into editor input. articles
 // is keyed by item URL; a failed or empty article leaves Article empty.
-func BuildInput(j *brief.Journal, articles map[string]fetch.Article) Input {
+// onFront reports whether a topic's stories may reach the front page; nil
+// means every topic's may.
+func BuildInput(j *brief.Journal, articles map[string]fetch.Article, onFront func(topic string) bool) Input {
 	in := Input{Highlights: j.Overview.Highlights}
 	in.Date, _ = time.Parse("2006-01-02", j.Date)
 	for _, s := range j.Sections {
 		if s == nil || s.Status != brief.StatusDone {
 			continue
 		}
-		c := ChapterIn{Topic: s.Topic}
+		c := ChapterIn{Topic: s.Topic, FrontPage: onFront == nil || onFront(s.Topic)}
 		ci := len(in.Chapters)
 		for _, it := range s.Items() {
 			c.Items = append(c.Items, itemIn(fmt.Sprintf("t%di%d", ci, len(c.Items)), it, articles[it.URL]))
