@@ -129,6 +129,12 @@ func TestRunFrontLeadReusesChapterPicture(t *testing.T) {
 	if want := []string{"https://example.com/alpha/a.jpg", "https://example.com/beta/a.jpg"}; !slices.Equal(e.picture.urls, want) {
 		t.Errorf("pictures fetched %v, want %v", e.picture.urls, want)
 	}
+	front := string(epubFile(t, book, "EPUB/front.xhtml"))
+	for _, want := range []string{`<img class="lead-main" src="img/ch1.jpg"`, `<img class="lead-pic" src="img/ch2.jpg"`} {
+		if !strings.Contains(front, want) {
+			t.Errorf("front page lacks %s\n%s", want, front)
+		}
+	}
 }
 
 func bookImages(t *testing.T, book []byte) (names []string, total int) {
