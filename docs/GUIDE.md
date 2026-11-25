@@ -394,7 +394,7 @@ characters. They are saved in the journal as the overview's `highlights`, and it
 Markdown (for `-print` and the reading time) is built from them, each with a
 link to its item's source. Two lines are added in code at no token cost: a
 numbers line (`12 items · 3 to act · 2 updates · 5 topics · ~7 min`) and a status line
-per topic (`Java & Quarkus - 3 items, 1 update`, `AI — quiet day`); with
+per topic (`Java & Quarkus - 3 items, 1 update`, `AI - quiet day`); with
 many topics the status lines are left out rather than the highlights.
 Highlights are dropped from the end until the whole fits about 180 words. A
 reply in prose falls back to its first 5 bullets, made plain the same way,
