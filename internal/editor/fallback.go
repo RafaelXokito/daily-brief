@@ -70,17 +70,23 @@ func FallbackFront(in Input) FrontPage {
 		fp.CoverLine = fp.Leads[0].Headline
 	}
 	for _, c := range in.Chapters {
-		p := BriefParagraph{Topic: c.Topic}
-		for _, it := range c.Items {
-			if !used[it.ID] {
-				p.Sentences = append(p.Sentences, BriefSentence{ID: it.ID, Text: sentence(plain(it.Headline))})
-			}
-		}
-		if len(p.Sentences) > 0 {
+		if p := fallbackParagraph(c, used); len(p.Sentences) > 0 {
 			fp.InBrief = append(fp.InBrief, p)
 		}
 	}
 	return fp
+}
+
+// fallbackParagraph is c's mechanical In Brief paragraph: the headline of
+// each item not among leads, as a sentence.
+func fallbackParagraph(c ChapterIn, leads map[string]bool) BriefParagraph {
+	p := BriefParagraph{Topic: c.Topic}
+	for _, it := range c.Items {
+		if !leads[it.ID] {
+			p.Sentences = append(p.Sentences, BriefSentence{ID: it.ID, Text: sentence(plain(it.Headline))})
+		}
+	}
+	return p
 }
 
 // sentence is s ending with a full stop, unless it already ends with one,

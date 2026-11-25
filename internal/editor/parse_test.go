@@ -79,13 +79,11 @@ func TestParseFront(t *testing.T) {
 
 func TestParseFrontErrors(t *testing.T) {
 	for name, reply := range map[string]string{
-		"unknown lead":  `{"leads":[{"id":"t9i9","headline":"L","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
-		"unknown brief": `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"topic":"Security","sentences":[{"id":"zz","text":"s"}]}],"cover_line":"C"}`,
-		"one lead":      `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
-		"duplicate":     `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"topic":"Security","sentences":[{"id":"t0i0","text":"s"}]}],"cover_line":"C"}`,
-		"empty lead":    `{"leads":[{"id":"t0i0","headline":"","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"topic":"Security","sentences":[{"id":"t0i1","text":"s"}]}],"cover_line":"C"}`,
-		"old shape":     `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"id":"t0i1","sentence":"s"}],"cover_line":"C"}`,
-		"no json":       "nope",
+		"unknown lead": `{"leads":[{"id":"t9i9","headline":"L","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
+		"one lead":     `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
+		"empty lead":   `{"leads":[{"id":"t0i0","headline":"","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"topic":"Security","sentences":[{"id":"t0i1","text":"s"}]}],"cover_line":"C"}`,
+		"old shape":    `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"id":"t0i1","sentence":"s"}],"cover_line":"C"}`,
+		"no json":      "nope",
 	} {
 		if _, err := parseFront(reply, testChapters()); err == nil {
 			t.Errorf("%s: expected error", name)
@@ -136,39 +134,62 @@ func TestParseFrontInBriefParagraphs(t *testing.T) {
 }
 
 // A topic with only one story after the front page leads has a
-// one-sentence paragraph; a topic with none has no paragraph.
+// one-sentence paragraph; a paragraph for a topic with none is dropped.
 func TestParseFrontInBriefShortTopics(t *testing.T) {
 	chapters := []Chapter{
 		{Topic: "Alpha", Stories: []Story{{ID: "t0i0"}, {ID: "t0i1"}}},
 		{Topic: "Beta", Stories: []Story{{ID: "t1i0"}}},
 	}
-	reply := briefReply(para("Alpha", "t0i1"))
-	if _, err := parseFront(reply, chapters); err != nil {
-		t.Errorf("one-sentence paragraph for a one-story topic: %v", err)
-	}
-	if _, err := parseFront(briefReply(para("Alpha", "t0i1")+","+para("Beta", "t1i0")), chapters); err == nil {
-		t.Errorf("a paragraph for a topic with no stories left was accepted")
+	for name, reply := range map[string]string{
+		"alpha only":     briefReply(para("Alpha", "t0i1")),
+		"beta with none": briefReply(para("Alpha", "t0i1") + "," + para("Beta", "t1i0")),
+	} {
+		fp, err := parseFront(reply, chapters)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(fp.InBrief) != 1 || fp.InBrief[0].Topic != "Alpha" {
+			t.Errorf("%s: in brief = %+v, want Alpha's paragraph only", name, fp.InBrief)
+		}
 	}
 }
 
-func TestParseFrontInBriefErrors(t *testing.T) {
+// A paragraph that breaks a rule is left out, not the whole reply; the
+// others are kept, in chapter order.
+func TestParseFrontDropsBadParagraphs(t *testing.T) {
 	world := para("World", "t1i1", "t1i2")
-	for name, inBrief := range map[string]string{
-		"unknown id":          para("Dev & Security", "t0i1", "t9i9") + "," + world,
-		"id from other topic": para("Dev & Security", "t0i1", "t1i1") + "," + para("World", "t1i2"),
-		"five sentences":      para("Dev & Security", "t0i1", "t0i2", "t0i3", "t0i4", "t0i5") + "," + world,
-		"id reused":           para("Dev & Security", "t0i1", "t0i1") + "," + world,
-		"lead id reused":      para("Dev & Security", "t0i1", "t0i0") + "," + world,
-		"one sentence":        para("Dev & Security", "t0i1") + "," + world,
-		"missing topic":       para("Dev & Security", "t0i1", "t0i2"),
-		"out of order":        world + "," + para("Dev & Security", "t0i1", "t0i2"),
-		"topic twice":         para("Dev & Security", "t0i1", "t0i2") + "," + para("Dev & Security", "t0i3", "t0i4") + "," + world,
-		"unknown topic":       para("Sport", "t0i1", "t0i2") + "," + world,
-		"empty text":          strings.Replace(para("Dev & Security", "t0i1", "t0i2"), "About t0i2.", " ", 1) + "," + world,
+	for name, tc := range map[string]struct {
+		inBrief string
+		kept    []string
+	}{
+		"unknown id":          {para("Dev & Security", "t0i1", "t9i9") + "," + world, []string{"World"}},
+		"id from other topic": {para("Dev & Security", "t0i1", "t1i1") + "," + world, []string{"World"}},
+		"five sentences":      {para("Dev & Security", "t0i1", "t0i2", "t0i3", "t0i4", "t0i5") + "," + world, []string{"World"}},
+		"id reused":           {para("Dev & Security", "t0i1", "t0i1") + "," + world, []string{"World"}},
+		"lead id reused":      {para("Dev & Security", "t0i1", "t0i0") + "," + world, []string{"World"}},
+		"one sentence":        {para("Dev & Security", "t0i1") + "," + world, []string{"World"}},
+		"empty text":          {strings.Replace(para("Dev & Security", "t0i1", "t0i2"), "About t0i2.", " ", 1) + "," + world, []string{"World"}},
+		"missing topic":       {para("Dev & Security", "t0i1", "t0i2"), []string{"Dev & Security"}},
+		"out of order":        {world + "," + para("Dev & Security", "t0i1", "t0i2"), []string{"Dev & Security", "World"}},
+		"topic twice":         {para("Dev & Security", "t0i1", "t0i2") + "," + para("Dev & Security", "t0i3", "t0i4") + "," + world, []string{"Dev & Security", "World"}},
+		"unknown topic":       {para("Sport", "t0i1", "t0i2") + "," + world, []string{"World"}},
 	} {
-		if _, err := parseFront(briefReply(inBrief), briefChapters()); err == nil {
-			t.Errorf("%s: expected error", name)
+		fp, err := parseFront(briefReply(tc.inBrief), briefChapters())
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
 		}
+		var got []string
+		for _, p := range fp.InBrief {
+			got = append(got, p.Topic)
+		}
+		if !reflect.DeepEqual(got, tc.kept) {
+			t.Errorf("%s: kept %v, want %v", name, got, tc.kept)
+		}
+	}
+	fp, _ := parseFront(briefReply(para("Dev & Security", "t0i1", "t0i2")+","+para("Dev & Security", "t0i3", "t0i4")+","+world), briefChapters())
+	if len(fp.InBrief) > 0 && fp.InBrief[0].Sentences[0].ID != "t0i1" {
+		t.Errorf("topic twice: kept %+v, want the first paragraph", fp.InBrief[0])
 	}
 }
 

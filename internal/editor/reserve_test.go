@@ -42,7 +42,7 @@ func claims(in Input, marginPct int) int64 {
 		fb = append(fb, fallbackChapter(c))
 	}
 	fs, fi := frontPrompt(in, fb)
-	return total + withMargin(newPlan(fs, fi, frontOutput).planned, marginPct)
+	return total + withMargin(newPlan(fs, fi, frontOutputFor(len(in.Chapters))).planned, marginPct)
 }
 
 // Reserve covers every claim Run makes on the worst-case input, margin

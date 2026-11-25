@@ -14,7 +14,12 @@ const (
 	outputWithBody    = 650  // planned output tokens per item with an article
 	outputWithoutBody = 200  // planned output tokens per item without one
 	outputPerPass     = 300
-	frontOutput       = 1500
+
+	// The front pass's planned output: a base, each lead it may write and
+	// one In Brief paragraph per front page chapter.
+	frontOutputBase     = 300
+	frontOutputPerLead  = 250
+	frontOutputPerBrief = 160
 
 	// Reserve's bounds on text it cannot see before research.
 	articleBytesPerWord = 7    // a fetched article's bytes per word; English runs about 6 with the space
@@ -31,6 +36,12 @@ type Budget struct {
 	Provider  string
 }
 
+// frontOutputFor is the front pass's planned output for chapters front page
+// chapters: the most leads it may write and an In Brief paragraph each.
+func frontOutputFor(chapters int) int64 {
+	return frontOutputBase + frontOutputPerLead*maxFrontLeads + frontOutputPerBrief*int64(chapters)
+}
+
 // Reserve is an upper bound on the editor's cost, known before research and
 // estimated as Run plans its passes: every item's prompt with an article
 // cut at fetch's default word limit and its planned reply, one chapter pass
@@ -40,7 +51,7 @@ func Reserve(chapters, items, marginPct int) int64 {
 	n := int64(items)
 	item := brief.EstimateTokens(strings.Repeat("x", fetch.DefaultMaxWords*articleBytesPerWord+itemFieldsBytes)) + outputWithBody
 	chapter := brief.EstimateTokens(chapterSystem) + passOverhead + outputPerPass
-	front := brief.EstimateTokens(frontSystem+strings.Repeat("x", items*frontBytesPerItem)) + passOverhead + frontOutput
+	front := brief.EstimateTokens(frontSystem+strings.Repeat("x", items*frontBytesPerItem)) + passOverhead + frontOutputFor(chapters)
 	return withMargin(n*item+int64(chapters)*chapter+front, marginPct)
 }
 
@@ -200,7 +211,7 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 		asFallback = append(asFallback, fallbackChapter(c))
 	}
 	fs, fi := frontPrompt(frontIn, asFallback)
-	p.reserve(withMargin(newPlan(fs, fi, frontOutput).planned, p.marginPct))
+	p.reserve(withMargin(newPlan(fs, fi, frontOutputFor(len(frontIn.Chapters))).planned, p.marginPct))
 	chapters := make([]Chapter, len(in.Chapters))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
@@ -216,20 +227,7 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 	wg.Wait()
 
 	p.release()
-	front, frontFellBack := FallbackFront(in), true
-	if onFront := frontChapters(in, chapters); ctx.Err() == nil && len(onFront) > 0 {
-		system, input := frontPrompt(frontIn, onFront)
-		if reply, ok := p.pass(ctx, b, newPlan(system, input, frontOutput)); ok {
-			if fp, err := parseFront(reply, onFront); err == nil && checkFront(fp, onFront, itemsByID(in)) {
-				front, frontFellBack = fp, false
-			}
-		}
-	}
-
-	fallbacks := 0
-	if frontFellBack {
-		fallbacks++
-	}
+	front, fallbacks := editFront(ctx, b, p, in, chapters)
 	for _, c := range chapters {
 		for _, s := range c.Stories {
 			if s.Fallback {
@@ -238,4 +236,60 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 		}
 	}
 	return Paper{Date: in.Date, Front: front, Chapters: chapters, Fallbacks: fallbacks, Tokens: p.spent}
+}
+
+// editFront runs the front page pass on the edited chapters and returns the
+// front page with its fallback count. The leads and the cover line stand or
+// fall together: when the pass cannot run, its reply is unusable, or a lead
+// or the cover line fails the fact check, the whole mechanical front page
+// takes its place and counts as one fallback. Otherwise each topic whose In
+// Brief paragraph is missing or fails its checks gets its mechanical
+// paragraph, one fallback each.
+func editFront(ctx context.Context, b brief.Backend, p *pool, in Input, chapters []Chapter) (FrontPage, int) {
+	frontIn, onFront := frontOnly(in), frontChapters(in, chapters)
+	if ctx.Err() != nil || len(onFront) == 0 {
+		return FallbackFront(in), 1
+	}
+	system, input := frontPrompt(frontIn, onFront)
+	reply, ok := p.pass(ctx, b, newPlan(system, input, frontOutputFor(len(onFront))))
+	if !ok {
+		return FallbackFront(in), 1
+	}
+	fp, err := parseFront(reply, onFront)
+	src := newFrontSources(onFront, itemsByID(in))
+	if err != nil || !src.leadsOK(fp) {
+		return FallbackFront(in), 1
+	}
+	return withInBrief(fp, frontIn.Chapters, src)
+}
+
+// withInBrief is fp with one In Brief paragraph for each front page chapter
+// that has items besides fp's leads, in chapter order: the model's when it
+// passed the parser and the fact check, else the chapter's mechanical
+// paragraph. It also returns how many topics fell back.
+func withInBrief(fp FrontPage, chapters []ChapterIn, src frontSources) (FrontPage, int) {
+	model := map[string]BriefParagraph{}
+	for _, para := range fp.InBrief {
+		model[para.Topic] = para
+	}
+	leads := map[string]bool{}
+	for _, l := range fp.Leads {
+		leads[l.ID] = true
+	}
+	var out []BriefParagraph
+	fell := 0
+	for _, c := range chapters {
+		mech := fallbackParagraph(c, leads)
+		if len(mech.Sentences) == 0 {
+			continue
+		}
+		if para, ok := model[c.Topic]; ok && src.briefOK(para) {
+			out = append(out, para)
+			continue
+		}
+		out = append(out, mech)
+		fell++
+	}
+	fp.InBrief = out
+	return fp, fell
 }

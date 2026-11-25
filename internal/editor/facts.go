@@ -74,29 +74,44 @@ func covered(text string, known map[string]bool) bool {
 	return true
 }
 
-// checkFront reports whether every fact on the front page has a source:
-// each lead and each In Brief sentence in its own story plus that story's
-// item and article, and the cover line in any of them.
-func checkFront(fp FrontPage, chapters []Chapter, items map[string]ItemIn) bool {
-	own := map[string]string{}
+// frontSources is where each front page fact may come from: a story's own
+// text plus its item and article, and for the cover line any of them.
+type frontSources struct {
+	own map[string]string // story id -> its sources
+	all string
+}
+
+func newFrontSources(chapters []Chapter, items map[string]ItemIn) frontSources {
+	src := frontSources{own: map[string]string{}}
 	var all []string
 	for _, c := range chapters {
 		for _, s := range c.Stories {
-			own[s.ID] = storyText(s) + "\n" + sourceText(items[s.ID])
-			all = append(all, own[s.ID])
+			src.own[s.ID] = storyText(s) + "\n" + sourceText(items[s.ID])
+			all = append(all, src.own[s.ID])
 		}
 	}
+	src.all = strings.Join(all, "\n")
+	return src
+}
+
+// leadsOK reports whether every fact in the leads is in the lead's own
+// story, item or article, and every fact in the cover line in any story.
+func (src frontSources) leadsOK(fp FrontPage) bool {
 	for _, l := range fp.Leads {
-		if !covered(strings.Join(append([]string{l.Headline}, l.Paragraphs...), "\n"), factTokens(own[l.ID])) {
+		if !covered(strings.Join(append([]string{l.Headline}, l.Paragraphs...), "\n"), factTokens(src.own[l.ID])) {
 			return false
 		}
 	}
-	for _, p := range fp.InBrief {
-		for _, b := range p.Sentences {
-			if !covered(b.Text, factTokens(own[b.ID])) {
-				return false
-			}
+	return covered(fp.CoverLine, factTokens(src.all))
+}
+
+// briefOK reports whether every fact in each sentence of p is in that
+// sentence's own story, item or article.
+func (src frontSources) briefOK(p BriefParagraph) bool {
+	for _, b := range p.Sentences {
+		if !covered(b.Text, factTokens(src.own[b.ID])) {
+			return false
 		}
 	}
-	return covered(fp.CoverLine, factTokens(strings.Join(all, "\n")))
+	return true
 }

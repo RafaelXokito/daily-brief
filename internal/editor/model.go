@@ -76,9 +76,13 @@ type FrontPage struct {
 
 // Paper is the finished edition.
 type Paper struct {
-	Date      time.Time
-	Front     FrontPage
-	Chapters  []Chapter
-	Fallbacks int // stories that fell back, plus one if the front page did
+	Date     time.Time
+	Front    FrontPage
+	Chapters []Chapter
+	// Fallbacks is the stories that fell back, plus one if the whole front
+	// page did, else one per In Brief topic that got its mechanical
+	// paragraph. The colophon prints it as "Stories set by the editor's
+	// fallback".
+	Fallbacks int
 	Tokens    int64
 }

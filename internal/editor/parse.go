@@ -153,9 +153,8 @@ type briefJSON struct {
 }
 
 // parseFront reads the front page reply. Every id must be a story in the
-// given chapters and may be used only once. In Brief is one paragraph per
-// chapter that has stories besides the leads, in chapter order, each of
-// two to four sentences about stories of its own chapter.
+// given chapters and may be used only once. A bad lead or cover line fails
+// the whole reply; a bad In Brief paragraph is only left out (parseInBrief).
 func parseFront(reply string, chapters []Chapter) (FrontPage, error) {
 	raw, err := decodeObject(reply, func(r frontJSON) bool { return len(r.Leads) > 0 && !blank(r.CoverLine) })
 	if err != nil {
@@ -192,18 +191,19 @@ func parseFront(reply string, chapters []Chapter) (FrontPage, error) {
 	if n := len(fp.Leads); n < minLeads || n > maxFrontLeads {
 		return FrontPage{}, fmt.Errorf("want %d to %d leads, got %d", minLeads, maxFrontLeads, n)
 	}
-	if fp.InBrief, err = parseInBrief(raw.InBrief, chapters, used); err != nil {
-		return FrontPage{}, err
-	}
+	fp.InBrief = parseInBrief(raw.InBrief, chapters, used)
 	fp.CoverLine = strings.TrimSpace(raw.CoverLine)
 	return fp, nil
 }
 
-// parseInBrief reads the In Brief paragraphs: one per chapter with
-// stories that are not leads, in chapter order.
-func parseInBrief(raw []briefJSON, chapters []Chapter, leads map[string]bool) ([]BriefParagraph, error) {
+// parseInBrief keeps the In Brief paragraphs that follow the rules: for
+// each chapter with stories that are not leads, in chapter order, the
+// first paragraph naming its topic, when it has two to four sentences each
+// about a different story of that chapter. A paragraph for an unknown
+// topic, a second one for a topic and one that breaks a rule are left out;
+// Run gives those topics their mechanical paragraph.
+func parseInBrief(raw []briefJSON, chapters []Chapter, leads map[string]bool) []BriefParagraph {
 	var out []BriefParagraph
-	next := 0
 	for _, c := range chapters {
 		left := map[string]bool{}
 		for _, s := range c.Stories {
@@ -214,20 +214,17 @@ func parseInBrief(raw []briefJSON, chapters []Chapter, leads map[string]bool) ([
 		if len(left) == 0 {
 			continue
 		}
-		if next == len(raw) || !sameTopic(raw[next].Topic, c.Topic) {
-			return nil, fmt.Errorf("in brief: want a paragraph for %q next", c.Topic)
+		for _, r := range raw {
+			if !sameTopic(r.Topic, c.Topic) {
+				continue
+			}
+			if p, err := briefParagraph(r, c.Topic, left); err == nil {
+				out = append(out, p)
+			}
+			break
 		}
-		p, err := briefParagraph(raw[next], c.Topic, left)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-		next++
 	}
-	if next < len(raw) {
-		return nil, fmt.Errorf("in brief: unexpected paragraph %q", raw[next].Topic)
-	}
-	return out, nil
+	return out
 }
 
 // briefParagraph checks one paragraph against the ids its chapter has

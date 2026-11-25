@@ -178,7 +178,7 @@ func frontWithMargin(in Input, pct int) int64 {
 		fb = append(fb, fallbackChapter(c))
 	}
 	fs, fi := frontPrompt(in, fb)
-	return withMargin(newPlan(fs, fi, frontOutput).planned, pct)
+	return withMargin(newPlan(fs, fi, frontOutputFor(len(in.Chapters))).planned, pct)
 }
 
 func TestRunSkipsPassThatDoesNotFit(t *testing.T) {
@@ -232,7 +232,7 @@ func TestRunPrefersCompose(t *testing.T) {
 	if want := chapterPlan(in.Chapters[0]).output; f.maxOutput[0] != want {
 		t.Fatalf("maxOutput = %d, want %d", f.maxOutput[0], want)
 	}
-	if f.maxOutput[len(f.maxOutput)-1] != frontOutput {
+	if f.maxOutput[len(f.maxOutput)-1] != frontOutputFor(len(in.Chapters)) {
 		t.Fatalf("front maxOutput = %d", f.maxOutput[len(f.maxOutput)-1])
 	}
 	g := newFake(1)
@@ -251,6 +251,29 @@ func TestRunFrontFallsBackOnBadReply(t *testing.T) {
 	}
 }
 
+// The front pass's output plan grows with the In Brief paragraphs it may
+// write: 300 tokens, 250 per lead (up to three) and 160 per chapter.
+func TestFrontOutputPlan(t *testing.T) {
+	if got := frontOutputFor(0); got != 300+3*250 {
+		t.Errorf("frontOutputFor(0) = %d", got)
+	}
+	if got := frontOutputFor(12); got != 300+3*250+12*160 {
+		t.Errorf("frontOutputFor(12) = %d", got)
+	}
+}
+
+// Run plans the front pass from its front page chapters only.
+func TestRunFrontOutputCountsFrontChapters(t *testing.T) {
+	in := workInput() // three chapters, two of them on the front page
+	f := composeBackend{newFake(1)}
+
+	Run(context.Background(), f, in, bigBudget(), 1)
+
+	if got := f.maxOutput[len(f.maxOutput)-1]; got != frontOutputFor(2) {
+		t.Errorf("front maxOutput = %d, want %d", got, frontOutputFor(2))
+	}
+}
+
 func TestOutputPlan(t *testing.T) {
 	c := ChapterIn{Items: []ItemIn{{Article: "x"}, {}}}
 	if got := chapterPlan(c).output; got != 650+200+300 {
@@ -265,7 +288,7 @@ func TestRunReservesFrontPage(t *testing.T) {
 		fb = append(fb, fallbackChapter(c))
 	}
 	fs, fi := frontPrompt(in, fb)
-	mFront := withMargin(newPlan(fs, fi, frontOutput).planned, 20)
+	mFront := withMargin(newPlan(fs, fi, frontOutputFor(len(in.Chapters))).planned, 20)
 	m2 := withMargin(chapterPlan(in.Chapters[1]).planned, 20)
 	f := newFake(1)
 	// Room for the front page and only the smaller chapter.
