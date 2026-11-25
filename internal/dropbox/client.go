@@ -145,6 +145,16 @@ func (c *Client) Delete(ctx context.Context, path string) error {
 	return err
 }
 
+// Move relocates from to to with files/move_v2. With autorename, Dropbox
+// picks a free name ("name (1).ext") when to already exists. It returns
+// ErrNotFound when from does not exist.
+func (c *Client) Move(ctx context.Context, from, to string, autorename bool) error {
+	_, err := c.apiJSON(ctx, "files/move_v2", map[string]any{
+		"from_path": from, "to_path": to, "autorename": autorename, "allow_ownership_transfer": false,
+	})
+	return err
+}
+
 func (c *Client) apiJSON(ctx context.Context, endpoint string, body any) ([]byte, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -194,7 +204,7 @@ func statusError(name string, status int, summary string) error {
 		switch {
 		case strings.HasPrefix(summary, "path/conflict"):
 			return fmt.Errorf("dropbox: %s: %w (%s)", name, ErrConflict, summary)
-		case strings.HasPrefix(summary, "path_lookup/not_found"), strings.HasPrefix(summary, "path/not_found"):
+		case strings.HasPrefix(summary, "path_lookup/not_found"), strings.HasPrefix(summary, "path/not_found"), strings.HasPrefix(summary, "from_lookup/not_found"):
 			return fmt.Errorf("dropbox: %s: %w (%s)", name, ErrNotFound, summary)
 		}
 	}

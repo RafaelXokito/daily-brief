@@ -451,3 +451,50 @@ func TestExpiredTokenRefreshedOnce(t *testing.T) {
 		t.Errorf("delete calls = %d", f2.count("/2/files/delete_v2"))
 	}
 }
+
+func TestMoveRequest(t *testing.T) {
+	f, c := newFake(t)
+	f.handlers["/2/files/move_v2"] = okJSON(`{"metadata":{}}`)
+	if err := c.Move(context.Background(), "/Kobo/old é.epub", "/Archive/old é.epub", true); err != nil {
+		t.Fatal(err)
+	}
+	m := f.find("/2/files/move_v2")
+	var body map[string]any
+	if err := json.Unmarshal(m.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"from_path": "/Kobo/old é.epub", "to_path": "/Archive/old é.epub", "autorename": true, "allow_ownership_transfer": false}
+	for k, v := range want {
+		if body[k] != v {
+			t.Errorf("%s = %v, want %v", k, body[k], v)
+		}
+	}
+	if err := c.Move(context.Background(), "/a", "/b", false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMoveNotFound(t *testing.T) {
+	for _, summary := range []string{"from_lookup/not_found/..", "path_lookup/not_found/.."} {
+		f, c := newFake(t)
+		f.handlers["/2/files/move_v2"] = func(w http.ResponseWriter, _ *http.Request, _ int) {
+			w.WriteHeader(409)
+			_, _ = w.Write([]byte(`{"error_summary":"` + summary + `"}`))
+		}
+		if err := c.Move(context.Background(), "/a", "/b", true); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Move %s: %v", summary, err)
+		}
+	}
+}
+
+func TestMoveOtherConflictIsPlainError(t *testing.T) {
+	f, c := newFake(t)
+	f.handlers["/2/files/move_v2"] = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		w.WriteHeader(409)
+		_, _ = w.Write([]byte(`{"error_summary":"to/conflict/file/.."}`))
+	}
+	err := c.Move(context.Background(), "/a", "/b", false)
+	if err == nil || errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v", err)
+	}
+}

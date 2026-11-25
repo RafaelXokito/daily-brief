@@ -92,7 +92,8 @@ var paperDeps = func(ctx context.Context, cfg config.Config, f paperFlags) (pape
 		if err != nil {
 			return deps, fmt.Errorf("%w: %w", paper.ErrConfig, err)
 		}
-		deps.Deliverer = paper.NewDropboxDeliverer(&client, cfg.Paper.FolderOrDefault(), cfg.Paper.TitleOrDefault())
+		deps.Deliverer = paper.NewDropboxDeliverer(&client, cfg.Paper.FolderOrDefault(), cfg.Paper.TitleOrDefault(),
+			cfg.Paper.ArchiveFolderOrDefault(), cfg.Paper.Dropbox.ArchiveDays)
 	}
 	backend, err := brief.NewBackend(ctx, cfg)
 	if err != nil {
@@ -128,7 +129,7 @@ func dropboxCommand(ctx context.Context, sub string, cfg config.Config) error {
 	return fmt.Errorf("unknown dropbox command %q (want login or status)", sub)
 }
 
-// dropboxStatus lists the paper folder and counts what it holds. base
+// dropboxStatus lists the paper and archive folders and counts what they hold. base
 // supplies test seams (HTTP, URLs); its AppKey and RefreshToken are
 // replaced. It changes nothing on Dropbox.
 func dropboxStatus(ctx context.Context, cfg config.Config, out io.Writer, base *dropbox.Client) error {
@@ -143,8 +144,15 @@ func dropboxStatus(ctx context.Context, cfg config.Config, out io.Writer, base *
 		return err
 	}
 	editions := len(paper.Stale(names, cfg.Paper.TitleOrDefault(), ""))
-	_, _ = fmt.Fprintf(out, "Dropbox is connected. %s holds %d %s, %d daily-brief %s.\n",
-		folder, len(names), plural(len(names), "file"), editions, plural(editions, "edition"))
+	archive := cfg.Paper.ArchiveFolderOrDefault()
+	archived, err := base.List(ctx, archive)
+	if err != nil && !errors.Is(err, dropbox.ErrNotFound) {
+		return err
+	}
+	archivedEditions := len(paper.Stale(archived, cfg.Paper.TitleOrDefault(), ""))
+	_, _ = fmt.Fprintf(out, "Dropbox is connected. %s holds %d %s, %d daily-brief %s. %s holds %d archived %s.\n",
+		folder, len(names), plural(len(names), "file"), editions, plural(editions, "edition"),
+		archive, archivedEditions, plural(archivedEditions, "edition"))
 	return nil
 }
 

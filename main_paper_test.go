@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -127,6 +128,12 @@ func TestDropboxStatusCountsEditions(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/token"):
 			_, _ = w.Write([]byte(`{"access_token":"a","expires_in":14400}`))
 		case strings.HasSuffix(r.URL.Path, "/files/list_folder"):
+			var arg struct{ Path string }
+			_ = json.NewDecoder(r.Body).Decode(&arg)
+			if arg.Path == "/Daily Brief Archive" {
+				_, _ = w.Write([]byte(`{"entries":[{".tag":"file","name":"The Daily Brief 2026-11-20.epub"},{".tag":"file","name":"The Daily Brief 2026-11-21.epub"},{".tag":"file","name":"Other.epub"}],"has_more":false}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"entries":[{".tag":"file","name":"The Daily Brief 2026-11-24.epub"},{".tag":"file","name":"Other.epub"}],"has_more":false}`))
 		default:
 			http.NotFound(w, r)
@@ -143,7 +150,7 @@ func TestDropboxStatusCountsEditions(t *testing.T) {
 	if err := dropboxStatus(context.Background(), cfg, &out, &c); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); !strings.Contains(got, "2 files") || !strings.Contains(got, "1 daily-brief edition") {
+	if got := out.String(); !strings.Contains(got, "2 files") || !strings.Contains(got, "1 daily-brief edition") || !strings.Contains(got, "2 archived editions") {
 		t.Errorf("status output: %q", got)
 	}
 }
@@ -215,5 +222,36 @@ func TestBudgetShowsPaperSplit(t *testing.T) {
 func TestBudgetOmitsPaperWhenUnset(t *testing.T) {
 	if out := budgetOutput(t, config.Default()); strings.Contains(out, "Paper:") {
 		t.Errorf("paper line without paper.token_budget:\n%s", out)
+	}
+}
+
+func TestDropboxStatusMissingArchiveFolder(t *testing.T) {
+	isolate(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var arg struct{ Path string }
+		_ = json.NewDecoder(r.Body).Decode(&arg)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/token"):
+			_, _ = w.Write([]byte(`{"access_token":"a","expires_in":14400}`))
+		case arg.Path == "/Daily Brief Archive":
+			w.WriteHeader(409)
+			_, _ = w.Write([]byte(`{"error_summary":"path/not_found/.."}`))
+		default:
+			_, _ = w.Write([]byte(`{"entries":[],"has_more":false}`))
+		}
+	}))
+	defer srv.Close()
+	cfg := config.Default()
+	cfg.Paper.Dropbox.AppKey = "key"
+	if err := dropbox.SaveRefreshToken(dropbox.DefaultTokenPath(), "refresh"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	c := dropbox.Client{HTTP: srv.Client(), TokenURL: srv.URL + "/token", APIBase: srv.URL}
+	if err := dropboxStatus(context.Background(), cfg, &out, &c); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "0 archived editions") {
+		t.Errorf("status output: %q", got)
 	}
 }

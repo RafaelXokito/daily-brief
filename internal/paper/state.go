@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/RafaelXokito/daily-brief/internal/config"
 )
@@ -133,6 +134,31 @@ func Stale(names []string, title, keep string) []string {
 	var out []string
 	for _, n := range names {
 		if n != keep && re.MatchString(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Expired picks, out of the names in the archive folder, the editions older
+// than days before today: those matching daily-brief's own pattern for title
+// (including Dropbox's " (N)" autorename suffix) whose date in the name is
+// before today minus days. days <= 0 keeps everything.
+func Expired(names []string, title string, today time.Time, days int) []string {
+	if days <= 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`^` + regexp.QuoteMeta(fileTitle(title)) + ` (\d{4}-\d{2}-\d{2})( \([1-9]\d*\))?\.epub$`)
+	y, m, d := today.Date()
+	cutoff := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -days)
+	var out []string
+	for _, n := range names {
+		match := re.FindStringSubmatch(n)
+		if match == nil {
+			continue
+		}
+		date, err := time.Parse("2006-01-02", match[1])
+		if err == nil && date.Before(cutoff) {
 			out = append(out, n)
 		}
 	}

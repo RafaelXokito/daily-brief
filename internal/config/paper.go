@@ -14,6 +14,9 @@ const (
 	// DefaultPaperFolder is the Dropbox folder Kobo syncs, when
 	// paper.dropbox.folder is unset.
 	DefaultPaperFolder = "/Apps/Rakuten Kobo"
+	// DefaultPaperArchiveFolder is where old editions are moved, when
+	// paper.dropbox.archive_folder is unset.
+	DefaultPaperArchiveFolder = "/Daily Brief Archive"
 	// MaxPaperTitleChars is the longest paper.title, in characters.
 	MaxPaperTitleChars = 80
 )
@@ -36,6 +39,12 @@ type PaperDropbox struct {
 	AppKey string `yaml:"app_key,omitempty"`
 	// Folder is an absolute Dropbox path; empty means DefaultPaperFolder.
 	Folder string `yaml:"folder,omitempty"`
+	// ArchiveFolder is an absolute Dropbox path outside Folder that old
+	// editions are moved to; empty means DefaultPaperArchiveFolder.
+	ArchiveFolder string `yaml:"archive_folder,omitempty"`
+	// ArchiveDays deletes archived editions older than this many days; 0
+	// keeps them all.
+	ArchiveDays int `yaml:"archive_days,omitempty"`
 }
 
 // TitleOrDefault is the paper title without surrounding spaces, or
@@ -55,6 +64,23 @@ func (p Paper) FolderOrDefault() string {
 	return p.Dropbox.Folder
 }
 
+// ArchiveFolderOrDefault is the archive folder, or DefaultPaperArchiveFolder
+// when unset.
+func (p Paper) ArchiveFolderOrDefault() string {
+	if p.Dropbox.ArchiveFolder == "" {
+		return DefaultPaperArchiveFolder
+	}
+	return p.Dropbox.ArchiveFolder
+}
+
+// insideOrSame reports whether path is dir or below it. Dropbox paths are
+// case-insensitive.
+func insideOrSame(path, dir string) bool {
+	path = strings.ToLower(strings.TrimRight(path, "/")) + "/"
+	dir = strings.ToLower(strings.TrimRight(dir, "/")) + "/"
+	return strings.HasPrefix(path, dir)
+}
+
 // Validate checks the paper section. The title becomes a file name, so it
 // may not hold path separators, control or invisible characters.
 func (p Paper) Validate() error {
@@ -72,6 +98,15 @@ func (p Paper) Validate() error {
 	}
 	if f := p.Dropbox.Folder; f != "" && !strings.HasPrefix(f, "/") {
 		return fmt.Errorf("config: paper.dropbox.folder must start with /, not %q", f)
+	}
+	if a := p.Dropbox.ArchiveFolder; a != "" && !strings.HasPrefix(a, "/") {
+		return fmt.Errorf("config: paper.dropbox.archive_folder must start with /, not %q", a)
+	}
+	if insideOrSame(p.ArchiveFolderOrDefault(), p.FolderOrDefault()) {
+		return fmt.Errorf("config: paper.dropbox.archive_folder %q must not be the Kobo folder %q or inside it", p.ArchiveFolderOrDefault(), p.FolderOrDefault())
+	}
+	if p.Dropbox.ArchiveDays < 0 {
+		return errors.New("config: paper.dropbox.archive_days must not be negative")
 	}
 	return nil
 }

@@ -733,7 +733,7 @@ A front page lead whose story already has a picture in its chapter shows the sam
 The pictures of one book stay under 1.5 MiB together: when they would not fit, the stories that need a picture are dropped first, then the chapter leads, and the front page leads are kept longest.
 A picture that cannot be fetched safely, or that repeats one already in the book (a site's generic logo), is simply left out, and the colophon counts the pictures.
 In the chapters, the editor may highlight up to two short key phrases per story, which print underlined (in the paper's red where the reader supports a coloured underline, on a soft ochre background where it supports one); headlines, standfirsts, the front page and fallback stories carry none.
-Only today's paper stays on the Kobo: after a successful upload, older editions that daily-brief created are deleted from Dropbox, and the Kobo drops them on its next sync.
+Only today's paper stays on the Kobo: after a successful upload, older editions that daily-brief created are moved out of the Kobo folder to an archive folder in Dropbox (see Archive below), and the Kobo drops them on its next sync.
 
 The server keeps its own config, topics and journals, separate from your laptop's.
 
@@ -748,6 +748,8 @@ paper:
   dropbox:
     app_key: <your Dropbox app key>   # not a secret
     folder: /Apps/Rakuten Kobo        # optional, this is the default
+    archive_folder: /Daily Brief Archive  # optional, this is the default
+    archive_days: 0                   # optional, 0 keeps archived editions forever
 ```
 
 `daily-brief paper` refuses to run unless the budget is a positive number, and `0` (auto) is refused.
@@ -755,6 +757,8 @@ paper:
 `daily-brief budget` shows what `paper.token_budget` buys: the research share (which also pays for the overview) and the editor share, reserved first.
 The title is used in the file name, so it cannot contain a slash or control characters.
 The folder must be an absolute Dropbox path.
+The archive folder must be an absolute Dropbox path too, and must not be the Kobo folder or inside it (Dropbox paths are case-insensitive, so `/apps/rakuten kobo/Old` is refused as well).
+`archive_days` must not be negative.
 
 The Dropbox refresh token is never stored in `config.yaml`.
 
@@ -811,7 +815,7 @@ It never stores your password.
 It also prints the `systemd-creds encrypt` command to move the token into an encrypted credential on a server (see below).
 
 `dropbox status` refreshes an access token and lists the folder.
-It prints the number of files and how many of them are daily-brief editions.
+It prints the number of files and how many of them are daily-brief editions, and how many editions the archive folder holds.
 It changes nothing.
 
 The token is read from the systemd credential `dropbox_refresh_token` (`$CREDENTIALS_DIRECTORY`) when there is one, and otherwise from the file above.
@@ -860,9 +864,22 @@ Files in Dropbox are named `<paper.title> YYYY-MM-DD.epub`, for example `The Dai
 Each edition has its own file name and its own EPUB identifier, because replacing a book under the same name is unreliable on the Kobo.
 A same-day rebuild with `-refresh` is uploaded as `The Daily Brief 2026-11-25 (2).epub`.
 
-Delivery uploads first, and only after the upload succeeds does it delete older editions.
-It deletes only files whose names match that pattern for the configured title, and never the file it just uploaded.
+Delivery uploads first, and only after the upload succeeds does it archive older editions.
+Each older edition in the Kobo folder is moved to `paper.dropbox.archive_folder` (default `/Daily Brief Archive`), so the Kobo drops it on its next sync but nothing is lost.
+Only files whose names match daily-brief's pattern for the configured title are moved, and never the file just uploaded.
 Everything else in the folder, such as Kobo's own PDF, is never touched.
+If the archive already has a file of that name (a same-day rebuild), Dropbox renames the newcomer, for example `The Daily Brief 2026-11-24 (1).epub`.
+A move that fails is a warning, not an error: the new paper is already delivered.
+
+### Archive
+
+By default the archive keeps every edition.
+Set `paper.dropbox.archive_days` to a positive number to delete archived editions whose date, read from the file name, is more than that many days before today.
+This runs after the move step, only touches files that match daily-brief's own name pattern (including Dropbox's ` (1)` suffix), and a failed delete is a warning.
+Anything else you put in the archive folder is never deleted.
+
+To reread an old edition on the Kobo, copy (or move) its file from the archive folder back into the Kobo folder in Dropbox.
+The next daily run archives it again, since it is no longer today's paper.
 
 Only one run works at a time: a run started while another is in progress exits 1 with "another paper run is in progress".
 

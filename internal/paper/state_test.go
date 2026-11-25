@@ -5,7 +5,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func TestDecide(t *testing.T) {
@@ -145,5 +147,31 @@ func TestLoadStateIOErrorStaysHard(t *testing.T) {
 	_, err := LoadState(dir)
 	if err == nil || errors.Is(err, ErrCorruptState) {
 		t.Errorf("err = %v, want a plain I/O error", err)
+	}
+}
+
+func TestExpired(t *testing.T) {
+	names := []string{
+		"The Daily Brief 2026-11-01.epub",
+		"The Daily Brief 2026-11-01 (1).epub",
+		"The Daily Brief 2026-11-15.epub",
+		"The Daily Brief 2026-11-16.epub",
+		"The Daily Brief 2026-11-25.epub",
+		"Other 2026-01-01.epub",
+		"The Daily Brief 2026-01-01.pdf",
+		"The Daily Brief 2026-13-45.epub",
+		"My Book.epub",
+	}
+	today := time.Date(2026, 11, 25, 15, 0, 0, 0, time.Local)
+	got := Expired(names, "The Daily Brief", today, 10)
+	want := []string{
+		"The Daily Brief 2026-11-01.epub",
+		"The Daily Brief 2026-11-01 (1).epub",
+	} // 2026-11-15 is exactly 10 days old: kept
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Expired = %v, want %v", got, want)
+	}
+	if got := Expired(names, "The Daily Brief", today, 0); len(got) != 0 {
+		t.Errorf("0 days must expire nothing: %v", got)
 	}
 }

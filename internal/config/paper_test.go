@@ -16,6 +16,12 @@ func TestPaperDefaults(t *testing.T) {
 	if p.FolderOrDefault() != "/Apps/Rakuten Kobo" {
 		t.Fatal(p.FolderOrDefault())
 	}
+	if p.ArchiveFolderOrDefault() != "/Daily Brief Archive" {
+		t.Fatal(p.ArchiveFolderOrDefault())
+	}
+	if got := (Paper{Dropbox: PaperDropbox{ArchiveFolder: "/Old"}}).ArchiveFolderOrDefault(); got != "/Old" {
+		t.Fatal(got)
+	}
 	set := Paper{Title: "Mine", Dropbox: PaperDropbox{Folder: "/Books"}}
 	if set.TitleOrDefault() != "Mine" || set.FolderOrDefault() != "/Books" {
 		t.Fatalf("set values not kept: %q %q", set.TitleOrDefault(), set.FolderOrDefault())
@@ -40,6 +46,14 @@ func TestPaperValidate(t *testing.T) {
 		{"title of 81 runes", Paper{Title: strings.Repeat("é", 81)}, false},
 		{"relative folder", Paper{Dropbox: PaperDropbox{Folder: "Apps/Kobo"}}, false},
 		{"absolute folder", Paper{Dropbox: PaperDropbox{Folder: "/Apps/Rakuten Kobo"}}, true},
+		{"relative archive", Paper{Dropbox: PaperDropbox{ArchiveFolder: "Archive"}}, false},
+		{"absolute archive", Paper{Dropbox: PaperDropbox{ArchiveFolder: "/Elsewhere"}}, true},
+		{"archive is kobo folder", Paper{Dropbox: PaperDropbox{ArchiveFolder: "/apps/rakuten kobo/"}}, false},
+		{"archive inside kobo folder", Paper{Dropbox: PaperDropbox{ArchiveFolder: "/Apps/Rakuten Kobo/Old"}}, false},
+		{"archive beside kobo folder", Paper{Dropbox: PaperDropbox{ArchiveFolder: "/Apps/Rakuten Kobo Old"}}, true},
+		{"default archive vs kobo folder set to it", Paper{Dropbox: PaperDropbox{Folder: "/daily brief archive"}}, false},
+		{"archive days", Paper{Dropbox: PaperDropbox{ArchiveDays: 30}}, true},
+		{"negative archive days", Paper{Dropbox: PaperDropbox{ArchiveDays: -1}}, false},
 		{"non-ascii title", Paper{Title: "Le Brief Quotidien · été"}, true},
 	} {
 		cfg := Default()
@@ -56,7 +70,7 @@ func TestPaperRoundTrip(t *testing.T) {
 	cfg.Paper = Paper{
 		TokenBudget: 400_000,
 		Title:       "Le Brief Quotidien · été",
-		Dropbox:     PaperDropbox{AppKey: "abc123", Folder: "/Books"},
+		Dropbox:     PaperDropbox{AppKey: "abc123", Folder: "/Books", ArchiveFolder: "/Shelf", ArchiveDays: 90},
 	}
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)

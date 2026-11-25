@@ -22,6 +22,10 @@ type fakeDropbox struct {
 	uploadBody string
 	deleteCode int
 	deleteBody string
+	moveCode   int
+	moveBody   string
+	archive    []string // names listed in /A
+	archiveErr int      // status for listing /A
 	uploaded   []byte
 }
 
@@ -52,11 +56,46 @@ func newFakeDropbox(t *testing.T, files []string) (*fakeDropbox, *dropbox.Client
 			Tag  string `json:".tag"`
 			Name string `json:"name"`
 		}
+		var arg struct{ Path string }
+		json.NewDecoder(r.Body).Decode(&arg)
+		names := f.files
+		if arg.Path == "/A" {
+			if f.archiveErr != 0 {
+				w.WriteHeader(f.archiveErr)
+				io.WriteString(w, `{"error_summary":"path/not_found/.."}`)
+				return
+			}
+			names = f.archive
+		}
 		var es []entry
-		for _, n := range f.files {
+		for _, n := range names {
 			es = append(es, entry{"file", n})
 		}
 		json.NewEncoder(w).Encode(map[string]any{"entries": es, "has_more": false})
+	})
+	mux.HandleFunc("/api/files/move_v2", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			From       string `json:"from_path"`
+			To         string `json:"to_path"`
+			Autorename bool   `json:"autorename"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.requests = append(f.requests, "move "+body.From+" -> "+body.To)
+		if !body.Autorename {
+			f.requests = append(f.requests, "NOT AUTORENAME")
+		}
+		if f.moveCode != 0 {
+			w.WriteHeader(f.moveCode)
+			b := f.moveBody
+			if b == "" {
+				b = `{"error_summary":"boom"}`
+			}
+			io.WriteString(w, b)
+			return
+		}
+		io.WriteString(w, `{}`)
 	})
 	mux.HandleFunc("/api/files/delete_v2", func(w http.ResponseWriter, r *http.Request) {
 		var body struct{ Path string }
@@ -97,9 +136,9 @@ var existing = []string{
 	"My Book.epub",
 }
 
-func TestDelivererUploadsThenDeletes(t *testing.T) {
+func TestDelivererUploadsThenMoves(t *testing.T) {
 	f, c := newFakeDropbox(t, existing)
-	warns, err := NewDropboxDeliverer(c, "/Apps/Rakuten Kobo/", testTitle).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("book"))
+	warns, err := NewDropboxDeliverer(c, "/Apps/Rakuten Kobo/", testTitle, "/A", 0).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("book"))
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("warns %v err %v", warns, err)
 	}
@@ -108,34 +147,34 @@ func TestDelivererUploadsThenDeletes(t *testing.T) {
 	}
 	want := []string{
 		"upload /Apps/Rakuten Kobo/The Daily Brief 2026-11-25 (2).epub",
-		"delete /Apps/Rakuten Kobo/The Daily Brief 2026-11-23.epub",
-		"delete /Apps/Rakuten Kobo/The Daily Brief 2026-11-24.epub",
-		"delete /Apps/Rakuten Kobo/The Daily Brief 2026-11-25.epub",
+		"move /Apps/Rakuten Kobo/The Daily Brief 2026-11-23.epub -> /A/The Daily Brief 2026-11-23.epub",
+		"move /Apps/Rakuten Kobo/The Daily Brief 2026-11-24.epub -> /A/The Daily Brief 2026-11-24.epub",
+		"move /Apps/Rakuten Kobo/The Daily Brief 2026-11-25.epub -> /A/The Daily Brief 2026-11-25.epub",
 	}
 	if strings.Join(f.requests, "\n") != strings.Join(want, "\n") {
 		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(f.requests, "\n"), strings.Join(want, "\n"))
 	}
 }
 
-func TestDelivererNeverDeletesTheUploadedFile(t *testing.T) {
+func TestDelivererNeverMovesTheUploadedFile(t *testing.T) {
 	f, c := newFakeDropbox(t, existing)
-	if _, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), testName, []byte("b")); err != nil {
+	if _, err := NewDropboxDeliverer(c, "/F", testTitle, "/A", 0).Deliver(context.Background(), testName, []byte("b")); err != nil {
 		t.Fatal(err)
 	}
 	if string(f.uploaded) != "b" {
 		t.Errorf("uploaded %q", f.uploaded)
 	}
 	for _, r := range f.requests {
-		if r == "delete /F/"+testName {
-			t.Errorf("deleted the file just uploaded")
+		if strings.HasPrefix(r, "move /F/"+testName) || strings.HasPrefix(r, "delete") {
+			t.Errorf("touched the file just uploaded: %s", r)
 		}
 	}
 }
 
-func TestDelivererFailedUploadMakesNoDelete(t *testing.T) {
+func TestDelivererFailedUploadMovesNothing(t *testing.T) {
 	f, c := newFakeDropbox(t, existing)
 	f.uploadCode, f.uploadBody = 403, `{"error_summary":"insufficient_space"}`
-	warns, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), testName, []byte("b"))
+	warns, err := NewDropboxDeliverer(c, "/F", testTitle, "/A", 0).Deliver(context.Background(), testName, []byte("b"))
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -143,8 +182,8 @@ func TestDelivererFailedUploadMakesNoDelete(t *testing.T) {
 		t.Errorf("warnings %v", warns)
 	}
 	for _, r := range f.requests {
-		if strings.HasPrefix(r, "delete") {
-			t.Errorf("delete after failed upload: %v", f.requests)
+		if strings.HasPrefix(r, "delete") || strings.HasPrefix(r, "move") {
+			t.Errorf("move or delete after failed upload: %v", f.requests)
 		}
 	}
 }
@@ -152,25 +191,25 @@ func TestDelivererFailedUploadMakesNoDelete(t *testing.T) {
 func TestDelivererConflictCountsAsDelivered(t *testing.T) {
 	f, c := newFakeDropbox(t, existing)
 	f.uploadCode, f.uploadBody = 409, `{"error_summary":"path/conflict/file/.."}`
-	warns, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
+	warns, err := NewDropboxDeliverer(c, "/F", testTitle, "/A", 0).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("warns %v err %v", warns, err)
 	}
 	n := 0
 	for _, r := range f.requests {
-		if strings.HasPrefix(r, "delete") {
+		if strings.HasPrefix(r, "move") {
 			n++
 		}
 	}
 	if n != 3 {
-		t.Errorf("stale deletion must still run after a conflict: %v", f.requests)
+		t.Errorf("stale archiving must still run after a conflict: %v", f.requests)
 	}
 }
 
-func TestDelivererDeleteFailureIsNotFatal(t *testing.T) {
+func TestDelivererMoveFailureIsNotFatal(t *testing.T) {
 	f, c := newFakeDropbox(t, existing)
-	f.deleteCode = 500
-	warns, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
+	f.moveCode = 500
+	warns, err := NewDropboxDeliverer(c, "/F", testTitle, "/A", 0).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
 	if err != nil {
 		t.Fatalf("delete failure must not fail the delivery: %v", err)
 	}
@@ -188,17 +227,114 @@ func TestDelivererDeleteFailureIsNotFatal(t *testing.T) {
 func TestDelivererListFailureIsAWarning(t *testing.T) {
 	_, c := newFakeDropbox(t, nil)
 	c.APIBase = c.APIBase + "/nope"
-	warns, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), testName, []byte("b"))
+	warns, err := NewDropboxDeliverer(c, "/F", testTitle, "/A", 0).Deliver(context.Background(), testName, []byte("b"))
 	if err != nil || len(warns) == 0 {
 		t.Errorf("warns %v err %v", warns, err)
 	}
 }
 
-func TestDelivererDeleteNotFoundIsSuccess(t *testing.T) {
+func TestDelivererMoveNotFoundIsSuccess(t *testing.T) {
 	f, c := newFakeDropbox(t, existing)
-	f.deleteCode, f.deleteBody = 409, `{"error_summary":"path_lookup/not_found/.."}`
-	warns, err := NewDropboxDeliverer(c, "/F", testTitle).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
+	f.moveCode, f.moveBody = 409, `{"error_summary":"from_lookup/not_found/.."}`
+	warns, err := NewDropboxDeliverer(c, "/F", testTitle, "/A", 0).Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
 	if err != nil || len(warns) != 0 {
 		t.Errorf("already-gone file must not warn: warns %v err %v", warns, err)
+	}
+}
+
+func fixedClock(d *dropboxDeliverer) {
+	d.now = func() time.Time { return time.Date(2026, 11, 25, 7, 0, 0, 0, time.Local) }
+}
+
+func requestsWithPrefix(f *fakeDropbox, prefix string) []string {
+	var out []string
+	for _, r := range f.requests {
+		if strings.HasPrefix(r, prefix) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func TestDelivererRetentionDeletesOnlyOldMatchingFiles(t *testing.T) {
+	f, c := newFakeDropbox(t, existing)
+	f.archive = []string{
+		"The Daily Brief 2026-10-01.epub",
+		"The Daily Brief 2026-10-01 (1).epub",
+		"The Daily Brief 2026-11-20.epub",
+		"My Book.epub",
+		"The Daily Brief 2026-01-01.pdf",
+		"Other 2026-01-01.epub",
+	}
+	d := NewDropboxDeliverer(c, "/F", testTitle, "/A", 30).(*dropboxDeliverer)
+	fixedClock(d)
+	warns, err := d.Deliver(context.Background(), "The Daily Brief 2026-11-25 (2).epub", []byte("b"))
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("warns %v err %v", warns, err)
+	}
+	got := requestsWithPrefix(f, "delete")
+	want := []string{
+		"delete /A/The Daily Brief 2026-10-01.epub",
+		"delete /A/The Daily Brief 2026-10-01 (1).epub",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("deletes %v, want %v", got, want)
+	}
+	// moves happen before retention deletes
+	lastMove, firstDelete := -1, -1
+	for i, r := range f.requests {
+		if strings.HasPrefix(r, "move") {
+			lastMove = i
+		}
+		if strings.HasPrefix(r, "delete") && firstDelete < 0 {
+			firstDelete = i
+		}
+	}
+	if lastMove > firstDelete {
+		t.Errorf("order: %v", f.requests)
+	}
+}
+
+func TestDelivererArchiveDaysZeroDeletesNothing(t *testing.T) {
+	f, c := newFakeDropbox(t, existing)
+	f.archive = []string{"The Daily Brief 2020-01-01.epub"}
+	d := NewDropboxDeliverer(c, "/F", testTitle, "/A", 0).(*dropboxDeliverer)
+	fixedClock(d)
+	if _, err := d.Deliver(context.Background(), testName, []byte("b")); err != nil {
+		t.Fatal(err)
+	}
+	if got := requestsWithPrefix(f, "delete"); len(got) != 0 {
+		t.Errorf("deleted %v", got)
+	}
+}
+
+func TestDelivererMissingArchiveFolderIsNotAWarning(t *testing.T) {
+	f, c := newFakeDropbox(t, existing)
+	f.archiveErr = 409
+	d := NewDropboxDeliverer(c, "/F", testTitle, "/A", 30).(*dropboxDeliverer)
+	fixedClock(d)
+	warns, err := d.Deliver(context.Background(), testName, []byte("b"))
+	if err != nil || len(warns) != 0 {
+		t.Errorf("warns %v err %v", warns, err)
+	}
+}
+
+func TestDelivererRetentionFailuresAreWarnings(t *testing.T) {
+	f, c := newFakeDropbox(t, nil)
+	f.archive = []string{"The Daily Brief 2026-01-01.epub"}
+	f.deleteCode = 500
+	d := NewDropboxDeliverer(c, "/F", testTitle, "/A", 30).(*dropboxDeliverer)
+	fixedClock(d)
+	warns, err := d.Deliver(context.Background(), testName, []byte("b"))
+	if err != nil || len(warns) != 1 || !strings.Contains(warns[0], "2026-01-01") {
+		t.Errorf("warns %v err %v", warns, err)
+	}
+	f2, c2 := newFakeDropbox(t, nil)
+	f2.archiveErr = 500
+	d2 := NewDropboxDeliverer(c2, "/F", testTitle, "/A", 30).(*dropboxDeliverer)
+	fixedClock(d2)
+	warns, err = d2.Deliver(context.Background(), testName, []byte("b"))
+	if err != nil || len(warns) != 1 {
+		t.Errorf("list failure: warns %v err %v", warns, err)
 	}
 }
