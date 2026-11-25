@@ -51,6 +51,8 @@ type storyJSON struct {
 	Dateline   string   `json:"dateline"`
 	Paragraphs []string `json:"paragraphs"`
 	Placement  string   `json:"placement"`
+	// NeedsPicture is optional and false when left out.
+	NeedsPicture bool `json:"needs_picture"`
 }
 
 type chapterJSON struct {
@@ -80,6 +82,8 @@ func cleanParagraphs(ps []string) []string {
 
 // parseChapter reads the editor's reply for one chapter. Every item must
 // appear exactly once; Host, Tag and URL come from the item, not the model.
+// The == marks in paragraphs become the story's highlights (parseMarks);
+// any in the headline, standfirst or dateline are stripped.
 func parseChapter(reply string, c ChapterIn) (Chapter, error) {
 	raw, err := decodeObject(reply, func(r chapterJSON) bool { return len(r.Stories) > 0 })
 	if err != nil {
@@ -100,10 +104,10 @@ func parseChapter(reply string, c ChapterIn) (Chapter, error) {
 			return Chapter{}, fmt.Errorf("item id %q appears twice", sj.ID)
 		case !validPlacement(sj.Placement):
 			return Chapter{}, fmt.Errorf("item %q: bad placement %q", sj.ID, sj.Placement)
-		case blank(sj.Headline):
+		case blank(unmark(sj.Headline)):
 			return Chapter{}, fmt.Errorf("item %q: empty headline", sj.ID)
 		}
-		paras := cleanParagraphs(sj.Paragraphs)
+		paras, highlights := parseMarks(sj.Paragraphs, maxHighlights)
 		if len(paras) == 0 {
 			return Chapter{}, fmt.Errorf("item %q: no paragraphs", sj.ID)
 		}
@@ -112,9 +116,9 @@ func parseChapter(reply string, c ChapterIn) (Chapter, error) {
 		}
 		seen[sj.ID] = true
 		ch.Stories = append(ch.Stories, Story{
-			ID: sj.ID, Headline: strings.TrimSpace(sj.Headline), Standfirst: strings.TrimSpace(sj.Standfirst),
-			Dateline: strings.TrimSpace(sj.Dateline), Paragraphs: paras, Placement: sj.Placement,
-			Host: it.Host, Tag: it.Tag, URL: it.URL,
+			ID: sj.ID, Headline: unmark(sj.Headline), Standfirst: unmark(sj.Standfirst),
+			Dateline: unmark(sj.Dateline), Paragraphs: paras, Placement: sj.Placement,
+			Host: it.Host, Tag: it.Tag, URL: it.URL, NeedsPicture: sj.NeedsPicture, Highlights: highlights,
 		})
 	}
 	for _, it := range c.Items {

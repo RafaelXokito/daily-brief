@@ -724,7 +724,12 @@ Where a source article could be fetched, the story is a long summary of it, so t
 Stories without a usable source are written from the research digest alone.
 Each story ends with a `[source]` link to the article it summarises (only http and https links), followed by "From <site>".
 The front page has the day's two or three biggest stories first, each with a "continued in" link to its chapter, then "In Brief": one line per other story, grouped under its topic in chapter order.
-Each chapter's lead story carries one small picture, the source article's own preview image, scaled to at most 800 px wide and compressed to under 90 KB (at most 1 MB for the whole book); the front page has none, and a picture that cannot be fetched safely is simply left out (the colophon counts them).
+Pictures are the source articles' own preview images, scaled to at most 800 px wide and compressed to under 90 KB each.
+Each front page lead and each chapter's lead story carries its picture, and so does any story the editor marks as needing one because a picture helps the reader understand it (a device, a place, a spacecraft, a route, a chart), at most 6 such stories per book.
+A front page lead whose story already has a picture in its chapter shows the same file, so the book does not grow.
+The pictures of one book stay under 1.5 MiB together: when they would not fit, the stories that need a picture are dropped first, then the chapter leads, and the front page leads are kept longest.
+A picture that cannot be fetched safely, or that repeats one already in the book (a site's generic logo), is simply left out, and the colophon counts the pictures.
+In the chapters, the editor may highlight up to two short key phrases per story, which print on a soft ochre background; headlines, standfirsts, the front page and fallback stories carry none.
 Only today's paper stays on the Kobo: after a successful upload, older editions that daily-brief created are deleted from Dropbox, and the Kobo drops them on its next sync.
 
 The server keeps its own config, topics and journals, separate from your laptop's.

@@ -39,9 +39,21 @@ type Story struct {
 	// URL is the item's source, never the model's.
 	URL string
 	// Image is the book-internal file name of the story's picture, such as
-	// "ch1.jpg", or "". paper.Run sets it on chapter leads; the model never does.
+	// "ch1.jpg" or "ch1-2.jpg", or "". paper.Run sets it on chapter leads and
+	// on stories that need a picture; the model never does.
 	Image string
+	// NeedsPicture is the editor's judgement that a picture helps the reader
+	// understand the story (a device, a place, a route, a chart).
+	NeedsPicture bool
+	// Highlights are the story's key phrases, in paragraph and text order.
+	// Paragraphs hold plain text; the model's == marks never reach them.
+	Highlights []Highlight
 }
+
+// Highlight is a key phrase: bytes [Start, End) of a story's
+// Paragraphs[Para]. The parser makes them; Render ignores any that do not
+// fit their paragraph.
+type Highlight struct{ Para, Start, End int }
 
 // Chapter is a topic's stories.
 type Chapter struct {

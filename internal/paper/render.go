@@ -25,7 +25,8 @@ type Meta struct {
 	Over               int64
 	Summarised, Failed int
 	Cut                []string
-	// Pictures of PictureCandidates chapter leads with a preview image got one.
+	// Pictures of PictureCandidates stories with a preview image got one:
+	// front page leads, chapter leads and stories that need a picture.
 	Pictures, PictureCandidates int
 }
 
@@ -67,9 +68,11 @@ type placed struct {
 // http(s).
 type storyView struct {
 	ID, Headline, Standfirst, Dateline, Host, URL string
-	DropCap, DropRest                             string
+	DropCap                                       string
+	DropRest                                      []segment
 	Image                                         string // the lead's picture, "img/chN.jpg", or ""
-	Paragraphs                                    []string
+	Pic                                           string // the picture of a story that needs one, "img/chN-K.jpg", or ""
+	Paragraphs                                    [][]segment
 	Act                                           bool
 }
 
@@ -103,17 +106,21 @@ func Render(p editor.Paper, m Meta) []epub.Chapter {
 		for _, s := range orderStories(c.Stories) {
 			sv := storyView{
 				ID: reg.add(s.ID, file), Headline: clean(s.Headline), Standfirst: clean(s.Standfirst),
-				Dateline: clean(s.Dateline), Host: clean(s.Host), URL: sourceURL(s.URL), Paragraphs: cleanAll(s.Paragraphs),
+				Dateline: clean(s.Dateline), Host: clean(s.Host), URL: sourceURL(s.URL), Paragraphs: paragraphViews(s.Paragraphs, s.Highlights),
 				Act: s.Tag == "ACT",
 			}
 			if _, seen := stories[s.ID]; !seen {
 				stories[s.ID] = placed{chapter: n - 1, title: title, lead: sv.Standfirst, act: sv.Act}
 			}
-			if s.Placement == "lead" && s.Image != "" {
+			switch {
+			case s.Image == "":
+			case s.Placement == "lead":
 				sv.Image = "img/" + s.Image
+			case s.NeedsPicture:
+				sv.Pic = "img/" + s.Image
 			}
 			if s.Placement == "lead" && len(sv.Paragraphs) > 0 {
-				if c, rest := dropCap(sv.Paragraphs[0]); c != "" {
+				if c, rest := dropCapSegments(sv.Paragraphs[0]); c != "" {
 					sv.DropCap, sv.DropRest, sv.Paragraphs = c, rest, sv.Paragraphs[1:]
 				}
 			}
@@ -267,17 +274,20 @@ func HumanTokens(n int64) string {
 	return s
 }
 
-// clean makes s safe to place in XHTML text: invalid UTF-8 is replaced,
+// clean makes s safe to place in XHTML text and trims it (sanitize).
+func clean(s string) string { return strings.TrimSpace(sanitize(s)) }
+
+// sanitize makes s safe to place in XHTML text: invalid UTF-8 is replaced,
 // control and invisible characters (brief.StripControl) and the XML
 // non-characters U+FFFE and U+FFFF are removed.
-func clean(s string) string {
+func sanitize(s string) string {
 	s = brief.StripControl(strings.ToValidUTF8(s, "�"))
-	return strings.TrimSpace(strings.Map(func(r rune) rune {
+	return strings.Map(func(r rune) rune {
 		if r == '￾' || r == '￿' {
 			return -1
 		}
 		return r
-	}, s))
+	}, s)
 }
 
 func cleanAll(ss []string) []string {

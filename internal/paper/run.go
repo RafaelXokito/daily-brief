@@ -3,16 +3,13 @@ package paper
 import (
 	"context"
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/RafaelXokito/daily-brief/internal/brief"
@@ -23,9 +20,6 @@ import (
 	"github.com/RafaelXokito/daily-brief/internal/fetch"
 	"github.com/RafaelXokito/daily-brief/internal/picture"
 )
-
-// maxPictureBytes caps the pictures of one book together.
-const maxPictureBytes = 1 << 20
 
 // Options are the paper command's flags. Budget, when positive, overrides
 // paper.token_budget for this run; Log receives the progress lines and
@@ -357,84 +351,6 @@ func fetchPicture(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	return picture.Prepare(data)
-}
-
-// pictureJobs lists the chapter leads whose source has a preview image,
-// naming each picture chN.jpg after its chapter as Render numbers them.
-func pictureJobs(p editor.Paper, images map[string]string) []pictureJob {
-	var jobs []pictureJob
-	n := 0 // only chapters with stories are numbered
-	for ci, c := range p.Chapters {
-		if len(c.Stories) == 0 {
-			continue
-		}
-		n++
-		si := slices.IndexFunc(c.Stories, func(s editor.Story) bool { return s.Placement == "lead" })
-		if si < 0 {
-			continue
-		}
-		if img := images[c.Stories[si].URL]; img != "" {
-			jobs = append(jobs, pictureJob{chapter: ci, story: si, name: fmt.Sprintf("ch%d.jpg", n), url: img})
-		}
-	}
-	return jobs
-}
-
-// pictureJob is one chapter lead's picture: where it goes and what came back.
-type pictureJob struct {
-	chapter, story int
-	name, url      string
-	data           []byte
-}
-
-// pictures fetches a picture for each chapter's lead story whose source
-// has a preview image, at most fetch.DefaultConcurrency at a time, and
-// keeps them in chapter order until one would take the book's pictures
-// over maxPictureBytes; that one and the rest are left out. A picture
-// that fails, or whose bytes repeat one already kept (a site's generic
-// logo), is skipped. It returns a copy of p with the kept leads' Image
-// set, the pictures, and how many leads had a preview image.
-func (x *run) pictures(p editor.Paper, images map[string]string) (editor.Paper, []epub.Image, int) {
-	jobs := pictureJobs(p, images)
-	if len(jobs) == 0 {
-		return p, nil, 0
-	}
-	x.logf("fetching %d pictures", len(jobs))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, fetch.DefaultConcurrency)
-	for i := range jobs {
-		wg.Add(1)
-		go func(j *pictureJob) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			if data, err := x.d.Picture(x.ctx, j.url); err == nil {
-				j.data = data
-			}
-		}(&jobs[i])
-	}
-	wg.Wait()
-	out := p
-	out.Chapters = slices.Clone(p.Chapters)
-	var pics []epub.Image
-	total := 0
-	kept := map[[sha256.Size]byte]bool{}
-	for _, j := range jobs {
-		sum := sha256.Sum256(j.data)
-		if len(j.data) == 0 || kept[sum] {
-			continue
-		}
-		if total+len(j.data) > maxPictureBytes {
-			break
-		}
-		kept[sum] = true
-		total += len(j.data)
-		stories := slices.Clone(out.Chapters[j.chapter].Stories)
-		stories[j.story].Image = j.name
-		out.Chapters[j.chapter].Stories = stories
-		pics = append(pics, epub.Image{Name: j.name, Data: j.data})
-	}
-	return out, pics, len(jobs)
 }
 
 // onFront reports whether a topic's stories may reach the front page: all

@@ -465,11 +465,11 @@ func TestRenderLeadImageOnly(t *testing.T) {
 
 func TestRenderColophonPictures(t *testing.T) {
 	m := sampleMeta()
-	if body := Render(samplePaper(), m)[3].Body; strings.Contains(body, "pictures") {
+	if body := Render(samplePaper(), m)[3].Body; strings.Contains(body, "ictures") {
 		t.Errorf("colophon mentions pictures when there were none to fetch\n%s", body)
 	}
 	m.Pictures, m.PictureCandidates = 1, 3
-	if body := Render(samplePaper(), m)[3].Body; !strings.Contains(body, "pictures: 1 of 3") {
+	if body := Render(samplePaper(), m)[3].Body; !strings.Contains(body, "Pictures: 1 of 3 with a preview image.") {
 		t.Errorf("colophon lacks the picture count\n%s", body)
 	}
 }

@@ -1,8 +1,10 @@
+{{define "segs"}}{{range .}}{{if .Mark}}<mark class="key">{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}{{end -}}
 {{define "story"}}{{if .Act}}<p class="tag act">Act now</p>
 {{end}}{{if .Standfirst}}<p class="standfirst">{{.Standfirst}}</p>
+{{end}}{{if .Pic}}<p class="pic"><img class="story-pic" src="{{.Pic}}" alt="{{.Headline}}"/></p>
 {{end}}{{if .Dateline}}<p class="dateline">{{.Dateline}}</p>
-{{end}}{{if .DropCap}}<p><span class="drop">{{.DropCap}}</span>{{.DropRest}}</p>
-{{end}}{{range .Paragraphs}}<p>{{.}}</p>
+{{end}}{{if .DropCap}}<p><span class="drop">{{.DropCap}}</span>{{template "segs" .DropRest}}</p>
+{{end}}{{range .Paragraphs}}<p>{{template "segs" .}}</p>
 {{end}}{{if or .URL .Host}}<p class="source">{{if .URL}}<a href="{{.URL}}">[source]</a>{{if .Host}} {{end}}{{end}}{{if .Host}}From {{.Host}}{{end}}</p>
 {{end}}{{end -}}
 <p class="chap">{{.Heading}}</p>

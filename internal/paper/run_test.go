@@ -40,6 +40,8 @@ type runBackend struct {
 	editorTokens               int64
 	onEditor                   func() // called on each editor pass
 	onResearch                 func() // called on each research pass
+	paragraph                  string // the chapter stories' text, when set
+	needsPicture               bool   // mark every story but the lead needs_picture
 }
 
 func (f *runBackend) Research(_ context.Context, t brief.Task) brief.Result {
@@ -68,7 +70,7 @@ func (f *runBackend) Summarize(_ context.Context, system, input string) brief.Re
 	switch {
 	case strings.Contains(system, "copy editor"):
 		f.editor++
-		return brief.Result{Markdown: chapterReply(input), Tokens: f.editorTokens}
+		return brief.Result{Markdown: chapterReply(input, f.paragraph, f.needsPicture), Tokens: f.editorTokens}
 	case strings.Contains(system, "front page editor"):
 		f.editor++
 		return brief.Result{Markdown: frontReply(input), Tokens: f.editorTokens}
@@ -85,12 +87,16 @@ func (f *runBackend) calls() (research, editor, overview int) {
 	return f.research, f.editor, f.overview
 }
 
-func chapterReply(input string) string {
+func chapterReply(input, paragraph string, needsPicture bool) string {
 	type story struct {
-		ID         string   `json:"id"`
-		Headline   string   `json:"headline"`
-		Paragraphs []string `json:"paragraphs"`
-		Placement  string   `json:"placement"`
+		ID           string   `json:"id"`
+		Headline     string   `json:"headline"`
+		Paragraphs   []string `json:"paragraphs"`
+		Placement    string   `json:"placement"`
+		NeedsPicture bool     `json:"needs_picture"`
+	}
+	if paragraph == "" {
+		paragraph = "The team shipped it."
 	}
 	var out struct {
 		Stories []story `json:"stories"`
@@ -101,7 +107,7 @@ func chapterReply(input string) string {
 			if len(out.Stories) == 0 {
 				p = "lead"
 			}
-			out.Stories = append(out.Stories, story{id, "Edited story", []string{"The team shipped it."}, p})
+			out.Stories = append(out.Stories, story{id, "Edited story", []string{paragraph}, p, needsPicture && p != "lead"})
 		}
 	}
 	b, _ := json.Marshal(out)
@@ -136,9 +142,11 @@ func frontReply(input string) string {
 }
 
 // fakeFetch returns an article for every "/a" URL and a failure otherwise.
+// Only "/a" articles have a preview image, unless allImages.
 type fakeFetch struct {
-	mu   sync.Mutex
-	urls [][]string
+	mu        sync.Mutex
+	urls      [][]string
+	allImages bool
 }
 
 func (f *fakeFetch) fetch(_ context.Context, urls []string) map[string]fetch.Article {
@@ -151,6 +159,9 @@ func (f *fakeFetch) fetch(_ context.Context, urls []string) map[string]fetch.Art
 			out[u] = fetch.Article{Text: "The widget team shipped a release after a long wait.", Words: 10, Image: u + ".jpg"}
 		} else {
 			out[u] = fetch.Article{Err: fetch.ErrTooShort}
+			if f.allImages {
+				out[u] = fetch.Article{Err: fetch.ErrTooShort, Image: u + ".jpg"}
+			}
 		}
 	}
 	return out
@@ -925,7 +936,7 @@ func TestRunPassesFrontPageChoice(t *testing.T) {
 func TestRunImagesCapped(t *testing.T) {
 	e := newRunEnv(t)
 	e.cfg.Topics = []config.Topic{{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"}, {Name: "Delta"}}
-	e.picture.size = 400_000
+	e.picture.size = 600_000
 	// The fourth would still fit after the third, but the book stops at
 	// the first picture that breaks the budget.
 	e.picture.sizes = map[string]int{"https://example.com/delta/a.jpg": 50_000}
@@ -956,8 +967,8 @@ func TestRunImagesCapped(t *testing.T) {
 	if !slices.Equal(names, []string{"EPUB/img/ch1.jpg", "EPUB/img/ch2.jpg"}) {
 		t.Errorf("pictures in the book %v, want ch1.jpg and ch2.jpg", names)
 	}
-	if total > 1<<20 {
-		t.Errorf("pictures total %d bytes, want at most 1 MiB", total)
+	if total > maxPictureBytes {
+		t.Errorf("pictures total %d bytes, want at most 1.5 MiB", total)
 	}
 	for ch, want := range map[string]bool{"ch1": true, "ch2": true, "ch3": false, "ch4": false} {
 		body := string(epubFile(t, book, "EPUB/"+ch+".xhtml"))
@@ -965,11 +976,13 @@ func TestRunImagesCapped(t *testing.T) {
 			t.Errorf("%s picture shown = %v, want %v\n%s", ch, got, want, body)
 		}
 	}
-	if strings.Contains(string(epubFile(t, book, "EPUB/front.xhtml")), "<img") {
-		t.Error("the front page has a picture")
+	for _, m := range regexp.MustCompile(`src="(img/[^"]+)"`).FindAllStringSubmatch(string(epubFile(t, book, "EPUB/front.xhtml")), -1) {
+		if !slices.Contains(names, "EPUB/"+m[1]) {
+			t.Errorf("the front page shows %s, not in the book", m[1])
+		}
 	}
-	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "pictures: 2 of 4") {
-		t.Errorf("colophon lacks pictures: 2 of 4\n%s", c)
+	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "Pictures: 2 of 4 ") {
+		t.Errorf("colophon lacks Pictures: 2 of 4\n%s", c)
 	}
 }
 
@@ -986,8 +999,8 @@ func TestRunPictureFailuresAreSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "pictures: 0 of 2") {
-		t.Errorf("colophon lacks pictures: 0 of 2\n%s", c)
+	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "Pictures: 0 of 2 ") {
+		t.Errorf("colophon lacks Pictures: 0 of 2\n%s", c)
 	}
 	if strings.Contains(string(epubFile(t, book, "EPUB/ch1.xhtml")), "<img") {
 		t.Error("a failed picture left an img element")
@@ -1024,8 +1037,8 @@ func TestRunSkipsRepeatedPicture(t *testing.T) {
 			t.Errorf("%s repeats the picture", ch)
 		}
 	}
-	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "pictures: 1 of 3") {
-		t.Errorf("colophon lacks pictures: 1 of 3\n%s", c)
+	if c := string(epubFile(t, book, "EPUB/colophon.xhtml")); !strings.Contains(c, "Pictures: 1 of 3 ") {
+		t.Errorf("colophon lacks Pictures: 1 of 3\n%s", c)
 	}
 }
 

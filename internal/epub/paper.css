@@ -21,6 +21,8 @@ h3.story { font-family: "Fell SC", serif; font-weight: normal; font-size: 1.05em
 .dateline { font-family: "Fell SC", serif; font-size: 0.85em; letter-spacing: 0.1em; margin-bottom: 0.3em; text-align: left; }
 .pic { text-align: center; margin: 0.4em 0 0.6em 0; page-break-inside: avoid; }
 .pic img { max-width: 100%; height: auto; }
+img.story-pic { width: 60%; height: auto; display: block; margin: 0 auto; }
+mark.key { background-color: #ecd9a0; color: inherit; padding: 0 0.1em; }
 .drop { float: left; font-family: "Fell SC", serif; font-size: 3.2em; line-height: 0.8; padding: 0.08em 0.1em 0 0; color: #2f5a3a; }
 .source { text-align: right; font-style: italic; font-size: 0.85em; }
 .continued { font-style: italic; font-size: 0.9em; text-align: right; }
