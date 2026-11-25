@@ -37,7 +37,7 @@ func factTokens(text string) map[string]bool {
 }
 
 func sourceText(it ItemIn) string {
-	return strings.Join([]string{it.Headline, it.Facts, it.Prose, it.Article}, "\n")
+	return strings.Join([]string{it.Headline, it.Facts, it.Prose, it.Host, it.Article}, "\n")
 }
 
 func storyText(s Story) string {
@@ -55,9 +55,12 @@ func checkStory(s Story, it ItemIn) bool {
 			return false
 		}
 	}
-	lower := strings.ToLower(src)
+	words := map[string]bool{}
+	for _, w := range wordRe.FindAllString(src, -1) {
+		words[strings.ToLower(w)] = true
+	}
 	for _, w := range wordRe.FindAllString(s.Dateline, -1) {
-		if !strings.Contains(lower, strings.ToLower(w)) {
+		if !words[strings.ToLower(w)] {
 			return false
 		}
 	}

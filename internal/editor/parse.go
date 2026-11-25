@@ -4,23 +4,44 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
-// decodeObject finds the first JSON object in reply that decodes into v,
-// skipping any prose or code fence around it.
-func decodeObject(reply string, v any) error {
-	for i := 0; i < len(reply); i++ {
-		if reply[i] != '{' {
-			continue
-		}
-		dec := json.NewDecoder(strings.NewReader(reply[i:]))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(v); err == nil {
-			return nil
+var fenceRe = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")
+
+// decodeObject finds the JSON object in reply: the last object that decodes
+// cleanly (no unknown fields, no type errors) and passes valid. A fenced
+// block is preferred when it holds one. Each attempt decodes into a fresh
+// value, so a failed attempt never leaks into the result.
+func decodeObject[T any](reply string, valid func(T) bool) (T, error) {
+	for _, m := range fenceRe.FindAllStringSubmatch(reply, -1) {
+		if v, ok := lastObject(m[1], valid); ok {
+			return v, nil
 		}
 	}
-	return errors.New("no valid JSON object in reply")
+	if v, ok := lastObject(reply, valid); ok {
+		return v, nil
+	}
+	var zero T
+	return zero, errors.New("no valid JSON object in reply")
+}
+
+func lastObject[T any](s string, valid func(T) bool) (best T, found bool) {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		var v T
+		dec := json.NewDecoder(strings.NewReader(s[i:]))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil || !valid(v) {
+			continue
+		}
+		best, found = v, true
+		i += int(dec.InputOffset()) - 1
+	}
+	return best, found
 }
 
 type storyJSON struct {
@@ -35,6 +56,11 @@ type storyJSON struct {
 type chapterJSON struct {
 	Stories []storyJSON `json:"stories"`
 }
+
+const (
+	minLeads      = 2
+	maxFrontLeads = 3
+)
 
 func validPlacement(p string) bool { return p == "lead" || p == "story" || p == "brief" }
 
@@ -53,8 +79,8 @@ func cleanParagraphs(ps []string) []string {
 // parseChapter reads the editor's reply for one chapter. Every item must
 // appear exactly once; Host and Tag come from the item, not the model.
 func parseChapter(reply string, c ChapterIn) (Chapter, error) {
-	var raw chapterJSON
-	if err := decodeObject(reply, &raw); err != nil {
+	raw, err := decodeObject(reply, func(r chapterJSON) bool { return len(r.Stories) > 0 })
+	if err != nil {
 		return Chapter{}, err
 	}
 	items := map[string]ItemIn{}
@@ -79,6 +105,9 @@ func parseChapter(reply string, c ChapterIn) (Chapter, error) {
 		if len(paras) == 0 {
 			return Chapter{}, fmt.Errorf("item %q: no paragraphs", sj.ID)
 		}
+		if sj.Placement == "brief" && len(paras) != 1 {
+			return Chapter{}, fmt.Errorf("item %q: a brief must be one paragraph", sj.ID)
+		}
 		seen[sj.ID] = true
 		ch.Stories = append(ch.Stories, Story{
 			ID: sj.ID, Headline: strings.TrimSpace(sj.Headline), Standfirst: strings.TrimSpace(sj.Standfirst),
@@ -90,6 +119,15 @@ func parseChapter(reply string, c ChapterIn) (Chapter, error) {
 		if !seen[it.ID] {
 			return Chapter{}, fmt.Errorf("item id %q missing", it.ID)
 		}
+	}
+	leads := 0
+	for _, s := range ch.Stories {
+		if s.Placement == "lead" {
+			leads++
+		}
+	}
+	if len(ch.Stories) > 0 && leads != 1 {
+		return Chapter{}, fmt.Errorf("want exactly one lead, got %d", leads)
 	}
 	return ch, nil
 }
@@ -110,8 +148,8 @@ type frontJSON struct {
 // parseFront reads the front page reply. Every id must be a story in the
 // given chapters and may be used only once.
 func parseFront(reply string, chapters []Chapter) (FrontPage, error) {
-	var raw frontJSON
-	if err := decodeObject(reply, &raw); err != nil {
+	raw, err := decodeObject(reply, func(r frontJSON) bool { return len(r.Leads) > 0 && !blank(r.CoverLine) })
+	if err != nil {
 		return FrontPage{}, err
 	}
 	known := map[string]bool{}
@@ -150,6 +188,9 @@ func parseFront(reply string, chapters []Chapter) (FrontPage, error) {
 			return FrontPage{}, fmt.Errorf("in brief %q: empty sentence", b.ID)
 		}
 		fp.InBrief = append(fp.InBrief, FrontLine{ID: b.ID, Sentence: strings.TrimSpace(b.Sentence)})
+	}
+	if n := len(fp.Leads); n < minLeads || n > maxFrontLeads {
+		return FrontPage{}, fmt.Errorf("want %d to %d leads, got %d", minLeads, maxFrontLeads, n)
 	}
 	fp.CoverLine = strings.TrimSpace(raw.CoverLine)
 	return fp, nil

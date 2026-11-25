@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const chapterSystem = `You are the copy editor of a morning newspaper. You rewrite one chapter's research items as newspaper stories. You never research and never search; you write only from what you are given.
@@ -37,18 +38,28 @@ Rules:
 Reply with one JSON object and nothing else, in this shape:
 {"leads":[{"id":"","headline":"","paragraphs":[""]}],"in_brief":[{"id":"","sentence":""}],"cover_line":""}`
 
-var delimiterRe = regexp.MustCompile(`(?i)<(/?article)`)
+var delimiterRe = regexp.MustCompile(`(?i)[<\x{FF1C}]\s*\\?\s*/?\s*article`)
 
 // quote neutralises the article delimiters in untrusted text so that the
 // only <article> tags in a prompt are the ones this package writes.
-func quote(s string) string { return delimiterRe.ReplaceAllString(s, "&lt;$1") }
+func quote(s string) string {
+	return delimiterRe.ReplaceAllStringFunc(s, func(m string) string {
+		_, n := utf8.DecodeRuneInString(m)
+		return "&lt;" + m[n:]
+	})
+}
+
+// line is quote for single-line fields: newlines cannot forge prompt structure.
+func line(s string) string {
+	return strings.Join(strings.Fields(quote(s)), " ")
+}
 
 func chapterPrompt(c ChapterIn) (system, input string) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Chapter: %s\n", quote(c.Topic))
+	fmt.Fprintf(&b, "Chapter: %s\n", line(c.Topic))
 	for _, it := range c.Items {
 		fmt.Fprintf(&b, "\nITEM %s\nHeadline: %s\nTag: %s\nFacts: %s\nDigest: %s\nSource: %s\n",
-			it.ID, quote(it.Headline), quote(it.Tag), quote(it.Facts), quote(it.Prose), quote(it.Host))
+			it.ID, line(it.Headline), line(it.Tag), line(it.Facts), line(it.Prose), line(it.Host))
 		if strings.TrimSpace(it.Article) != "" {
 			fmt.Fprintf(&b, "<article id=%q>\n%s\n</article>\n", it.ID, quote(it.Article))
 		}
@@ -60,16 +71,16 @@ func frontPrompt(in Input, chapters []Chapter) (system, input string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Date: %s\n\nHighlights:\n", in.Date.Format("2 January 2006"))
 	for _, h := range in.Highlights {
-		fmt.Fprintf(&b, "- [%s] %s: %s %s\n", quote(h.Tier), quote(h.Headline), quote(h.Text), quote(h.Why))
+		fmt.Fprintf(&b, "- [%s] %s: %s %s\n", line(h.Tier), line(h.Headline), line(h.Text), line(h.Why))
 	}
 	for _, c := range chapters {
-		fmt.Fprintf(&b, "\nChapter: %s\n", quote(c.Topic))
+		fmt.Fprintf(&b, "\nChapter: %s\n", line(c.Topic))
 		for _, s := range c.Stories {
 			first := ""
 			if len(s.Paragraphs) > 0 {
 				first = s.Paragraphs[0]
 			}
-			fmt.Fprintf(&b, "STORY %s\nHeadline: %s\nOpening: %s\n", s.ID, quote(s.Headline), quote(first))
+			fmt.Fprintf(&b, "STORY %s\nHeadline: %s\nOpening: %s\n", s.ID, line(s.Headline), line(first))
 		}
 	}
 	return frontSystem, b.String()

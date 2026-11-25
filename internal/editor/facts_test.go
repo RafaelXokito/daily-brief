@@ -68,3 +68,19 @@ func TestCheckStoryCurrency(t *testing.T) {
 		t.Fatal("currency in source should pass")
 	}
 }
+
+func TestCheckStoryDatelineWholeWords(t *testing.T) {
+	for _, tc := range []struct{ place, src string }{
+		{"PARIS", "a comparison"}, {"LIMA", "the climate"}, {"ROME", "to promote"}, {"NICE", "a notice"},
+	} {
+		if checkStory(Story{Dateline: tc.place}, ItemIn{Prose: tc.src}) {
+			t.Errorf("%s must not match %q", tc.place, tc.src)
+		}
+	}
+}
+
+func TestCheckStoryHost(t *testing.T) {
+	if !checkStory(Story{Paragraphs: []string{"Reported by 9to5mac."}}, ItemIn{Host: "9to5mac.com"}) {
+		t.Fatal("host digits are source text")
+	}
+}

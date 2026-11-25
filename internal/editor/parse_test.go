@@ -65,12 +65,12 @@ func testChapters() []Chapter {
 }
 
 func TestParseFront(t *testing.T) {
-	reply := "```json\n" + `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]}],"in_brief":[{"id":"t0i1","sentence":"s"}],"cover_line":"C"}` + "\n```"
+	reply := "```json\n" + `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]},{"id":"t0i2","headline":"L2","paragraphs":["p"]}],"in_brief":[{"id":"t0i1","sentence":"s"}],"cover_line":"C"}` + "\n```"
 	fp, err := parseFront(reply, testChapters())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fp.Leads) != 1 || fp.Leads[0].ID != "t0i0" || len(fp.InBrief) != 1 || fp.CoverLine != "C" {
+	if len(fp.Leads) != 2 || fp.Leads[0].ID != "t0i0" || len(fp.InBrief) != 1 || fp.CoverLine != "C" {
 		t.Fatalf("%+v", fp)
 	}
 }
@@ -78,13 +78,64 @@ func TestParseFront(t *testing.T) {
 func TestParseFrontErrors(t *testing.T) {
 	for name, reply := range map[string]string{
 		"unknown lead":  `{"leads":[{"id":"t9i9","headline":"L","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
-		"unknown brief": `{"leads":[],"in_brief":[{"id":"zz","sentence":"s"}],"cover_line":"C"}`,
-		"duplicate":     `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]}],"in_brief":[{"id":"t0i0","sentence":"s"}],"cover_line":"C"}`,
-		"empty lead":    `{"leads":[{"id":"t0i0","headline":"","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
+		"unknown brief": `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"id":"zz","sentence":"s"}],"cover_line":"C"}`,
+		"one lead":      `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
+		"duplicate":     `{"leads":[{"id":"t0i0","headline":"L","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[{"id":"t0i0","sentence":"s"}],"cover_line":"C"}`,
+		"empty lead":    `{"leads":[{"id":"t0i0","headline":"","paragraphs":["p"]},{"id":"t0i2","headline":"L","paragraphs":["p"]}],"in_brief":[],"cover_line":"C"}`,
 		"no json":       "nope",
 	} {
 		if _, err := parseFront(reply, testChapters()); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+}
+
+func TestParseChapterLeadCount(t *testing.T) {
+	story := func(id, placement string) string {
+		return `{"id":"` + id + `","headline":"H","paragraphs":["P"],"placement":"` + placement + `"}`
+	}
+	for name, reply := range map[string]string{
+		"zero leads": `{"stories":[` + story("t0i0", "story") + "," + story("t0i1", "brief") + `]}`,
+		"two leads":  `{"stories":[` + story("t0i0", "lead") + "," + story("t0i1", "lead") + `]}`,
+	} {
+		if _, err := parseChapter(reply, testChapter()); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+}
+
+func TestParseChapterBriefOneParagraph(t *testing.T) {
+	reply := `{"stories":[{"id":"t0i0","headline":"H","paragraphs":["P"],"placement":"lead"},{"id":"t0i1","headline":"H","paragraphs":["P","Q"],"placement":"brief"}]}`
+	if _, err := parseChapter(reply, testChapter()); err == nil {
+		t.Fatal("two-paragraph brief should fail")
+	}
+}
+
+func TestParseChapterObjectSelection(t *testing.T) {
+	draft := strings.Replace(goodChapter, `"headline":"H1"`, `"headline":"DRAFT"`, 1)
+	for name, tc := range map[string]struct {
+		reply, headline string
+		ok              bool
+	}{
+		"trailing {}":         {goodChapter + " trailing {}", "H1", true},
+		"lone {}":             {"I would put {} here.", "", false},
+		"unknown key then {}": {strings.Replace(goodChapter, `]}`, `],"extra":1}`, 1) + " trailing {}", "", false},
+		"draft then final":    {draft + "\nCorrected:\n" + goodChapter, "H1", true},
+		"fence wins":          {"```json\n" + goodChapter + "\n```\nAlso " + draft, "H1", true},
+	} {
+		ch, err := parseChapter(tc.reply, testChapter())
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: err=%v", name, err)
+			continue
+		}
+		if tc.ok && ch.Stories[0].Headline != tc.headline {
+			t.Errorf("%s: got %q", name, ch.Stories[0].Headline)
+		}
+	}
+}
+
+func TestParseFrontEmptyObject(t *testing.T) {
+	if _, err := parseFront("I would put {} here.", testChapters()); err == nil {
+		t.Fatal("empty object must fail")
 	}
 }
