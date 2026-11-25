@@ -262,6 +262,11 @@ func (x *run) journal(budget int64) (*brief.Journal, int64) {
 		}
 	}
 	spent := j.TokensUsed()
+	for _, s := range j.Sections {
+		if s != nil && s.Status == brief.StatusFailed {
+			x.warn(fmt.Sprintf("%s: %s", s.Topic, s.Error))
+		}
+	}
 	if note := j.OvershootNote(); note != "" {
 		x.warn("research: " + note)
 	}

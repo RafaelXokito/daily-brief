@@ -695,3 +695,31 @@ func TestUUID5KnownVector(t *testing.T) {
 		t.Fatalf("uuid5 = %s", got)
 	}
 }
+
+func TestRunLogsResearchFailures(t *testing.T) {
+	e := newRunEnv(t)
+	e.backend.researchErr = errors.New("no network")
+
+	_, err := e.run(Options{NoDeliver: true})
+
+	if !errors.Is(err, ErrNoStories) {
+		t.Fatalf("err = %v", err)
+	}
+	for _, topic := range []string{"Alpha", "Beta"} {
+		if want := "warning: " + topic + ": "; !strings.Contains(e.log.String(), want) || !strings.Contains(e.log.String(), "no network") {
+			t.Errorf("log lacks %q with the error:\n%s", want, e.log.String())
+		}
+	}
+}
+
+func TestRunLogsSkippedTopics(t *testing.T) {
+	e := newRunEnv(t)
+	e.cfg.MaxReadMinutes = 1
+	e.cfg.Topics = append(e.cfg.Topics, config.Topic{Name: "Gamma"}, config.Topic{Name: "Delta"}, config.Topic{Name: "Epsilon"})
+
+	_, _ = e.run(Options{NoDeliver: true})
+
+	if !strings.Contains(e.log.String(), ": skipped: ") {
+		t.Errorf("log names no skipped topic:\n%s", e.log.String())
+	}
+}
