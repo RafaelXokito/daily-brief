@@ -24,6 +24,13 @@ const (
 	flatSamples = 64
 	flatColours = 4
 	flatShare   = 0.95
+
+	// A flat picture is logo-shaped when nearly square (width over
+	// height within [squareMin, squareMax]) or a banner wider than
+	// bannerMin; a chart or a diagram is usually neither.
+	squareMin = 0.8
+	squareMax = 1.25
+	bannerMin = 3.0
 )
 
 // nameWords are whole words of an image's file name that mark it as a
@@ -39,7 +46,8 @@ var (
 
 // logoLike reports whether a preview image is a site's logo or a stand-in
 // rather than a photo of the story, so the paper prints it small. It is
-// any one of three signals, each strict so that photos are not caught:
+// any one of three signals, each strict so that photos, charts and
+// diagrams are not caught:
 //
 //   - its URL path names it: a file name word in nameWords (or "logo" or
 //     "favicon" anywhere in the file name, for siteLogo.png), or a
@@ -47,14 +55,28 @@ var (
 //     and words are whole ("silicon" is not "icon");
 //   - the original is smaller than minPhotoWidth by minPhotoHeight
 //     pixels, too small to be printed large anyway;
-//   - it is flat: the flatColours most common colours of a coarse sample
-//     (transparency counted as white) cover flatShare of it, as a logo on
-//     a plain field does. A mostly plain background alone is not enough,
-//     since a device photographed on white has one too; its shading and
-//     shadows spread over many more colours.
-func logoLike(rawURL string, img image.Image) bool {
+//   - it is flat and logo-shaped: the flatColours most common colours of
+//     a coarse sample (transparency counted as white) cover flatShare of
+//     it, as a logo on a plain field does, and it is nearly square or a
+//     wide banner. Flat colours alone are not enough: a chart or diagram
+//     is flat too, but rarely that shape. A mostly plain background is not
+//     a signal either, since a device photographed on white has one; its
+//     shading and shadows spread over many more colours.
+//
+// For an Aid picture (one the editor asked for to help the reader
+// understand) only the first two signals count, never flat colours.
+func logoLike(src Source, img image.Image) bool {
 	b := img.Bounds()
-	return namedLikeLogo(rawURL) || b.Dx() < minPhotoWidth || b.Dy() < minPhotoHeight || flat(img)
+	if namedLikeLogo(src.URL) || b.Dx() < minPhotoWidth || b.Dy() < minPhotoHeight {
+		return true
+	}
+	return !src.Aid && logoShaped(b.Dx(), b.Dy()) && flat(img)
+}
+
+// logoShaped reports whether a w by h picture is nearly square or a wide banner.
+func logoShaped(w, h int) bool {
+	aspect := float64(w) / float64(h)
+	return (aspect >= squareMin && aspect <= squareMax) || aspect > bannerMin
 }
 
 // namedLikeLogo reports whether the URL's path names a logo (see logoLike).

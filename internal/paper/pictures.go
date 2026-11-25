@@ -24,9 +24,14 @@ const (
 // and where it is shown.
 type pictureJob struct {
 	name, url      string
-	front          int // index among the front page leads, or -1
-	chapter, story int // the story in Paper.Chapters, or -1 when shown only on the front page
+	front          int  // index among the front page leads, or -1
+	chapter, story int  // the story in Paper.Chapters, or -1 when shown only on the front page
+	needs          bool // shown in its chapter because the story needs a picture, not as the lead
 }
+
+// aid reports whether j's picture is shown only for a story that needs
+// one: in its chapter, not as the lead, and not on the front page.
+func (j pictureJob) aid() bool { return j.needs && j.front < 0 }
 
 // pictureJobs lists, in priority order, the stories whose source has a
 // preview image: the front page leads, the chapter leads, then the first
@@ -86,7 +91,7 @@ func chapterPictureJobs(p editor.Paper, images map[string]string) (map[string]pi
 				leads = append(leads, s.ID)
 			case s.NeedsPicture && len(needs) < maxStoryPictures:
 				k++
-				j.name = fmt.Sprintf("ch%d-%d.jpg", n, k)
+				j.name, j.needs = fmt.Sprintf("ch%d-%d.jpg", n, k), true
 				needs = append(needs, s.ID)
 			default:
 				continue
@@ -153,13 +158,17 @@ func showPicture(p *editor.Paper, j pictureJob, small bool) {
 }
 
 // downloadPictures fetches each distinct preview image of jobs once and
-// returns the prepared pictures by URL; failures are absent.
+// returns the prepared pictures by URL; failures are absent. An image is
+// fetched as an Aid only when every job showing it is one (aid).
 func (x *run) downloadPictures(jobs []pictureJob) map[string]picture.Picture {
 	var urls []string
+	aid := map[string]bool{}
 	for _, j := range jobs {
 		if !slices.Contains(urls, j.url) {
 			urls = append(urls, j.url)
+			aid[j.url] = true
 		}
+		aid[j.url] = aid[j.url] && j.aid()
 	}
 	x.logf("fetching %d pictures", len(urls))
 	var mu sync.Mutex
@@ -172,7 +181,7 @@ func (x *run) downloadPictures(jobs []pictureJob) map[string]picture.Picture {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if pic, err := x.d.Picture(x.ctx, u); err == nil {
+			if pic, err := x.d.Picture(x.ctx, picture.Source{URL: u, Aid: aid[u]}); err == nil {
 				mu.Lock()
 				out[u] = pic
 				mu.Unlock()

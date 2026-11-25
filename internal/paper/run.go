@@ -36,7 +36,7 @@ type Options struct {
 type Deps struct {
 	Backend   brief.Backend
 	Fetch     func(context.Context, []string) map[string]fetch.Article
-	Picture   func(ctx context.Context, url string) (picture.Picture, error)
+	Picture   func(ctx context.Context, src picture.Source) (picture.Picture, error)
 	Deliverer Deliverer
 	Now       func() time.Time
 	Dir       string
@@ -345,12 +345,12 @@ func (x *run) withArticles(in editor.Input) (editor.Input, map[string]string) {
 
 // fetchPicture downloads an image through the fetch guard and prepares it
 // for the book, small when it looks like a logo.
-func fetchPicture(ctx context.Context, url string) (picture.Picture, error) {
-	data, _, err := fetch.FetchImage(ctx, url, fetch.Options{})
+func fetchPicture(ctx context.Context, src picture.Source) (picture.Picture, error) {
+	data, _, err := fetch.FetchImage(ctx, src.URL, fetch.Options{})
 	if err != nil {
 		return picture.Picture{}, err
 	}
-	return picture.Prepare(data, url)
+	return picture.Prepare(data, src)
 }
 
 // onFront reports whether a topic's stories may reach the front page: all

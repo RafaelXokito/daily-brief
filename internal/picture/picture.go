@@ -60,14 +60,21 @@ type Picture struct {
 	Small bool
 }
 
-// Prepare decodes a JPEG, PNG, GIF or WebP image downloaded from rawURL
-// and returns it as a JPEG at most MaxWidth pixels wide (SmallWidth when
+// Source is where a picture comes from and what it is for: URL is the
+// image's address, and Aid means the editor asked for the picture to help
+// the reader understand the story, so flat colours never make it small.
+type Source struct {
+	URL string
+	Aid bool
+}
+
+// Prepare decodes a JPEG, PNG, GIF or WebP image from src and returns it as a JPEG at most MaxWidth pixels wide (SmallWidth when
 // Small) and MaxBytes long, transparency flattened on white. The header
 // is checked before the image is decoded: sides over 8000 pixels or over
 // 40 megapixels are refused, and for WebP every frame header too (it must
 // match the canvas; animation is refused). Concurrent calls decode one at
 // a time.
-func Prepare(data []byte, rawURL string) (Picture, error) {
+func Prepare(data []byte, src Source) (Picture, error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return Picture{}, fmt.Errorf("picture: %w", err)
@@ -82,16 +89,16 @@ func Prepare(data []byte, rawURL string) (Picture, error) {
 	}
 	decodeMu.Lock()
 	defer decodeMu.Unlock()
-	src, _, err := decode(bytes.NewReader(data))
+	img, _, err := decode(bytes.NewReader(data))
 	if err != nil {
 		return Picture{}, fmt.Errorf("picture: %w", err)
 	}
-	small := logoLike(rawURL, src)
+	small := logoLike(src, img)
 	width := MaxWidth
 	if small {
 		width = SmallWidth
 	}
-	out, err := compress(scale(src, width))
+	out, err := compress(scale(img, width))
 	if err != nil {
 		return Picture{}, err
 	}

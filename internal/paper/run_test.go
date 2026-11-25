@@ -177,12 +177,18 @@ type fakePictures struct {
 	sizes map[string]int  // per-URL size, overriding size
 	small map[string]bool // URLs whose picture is logo-like
 	urls  []string
+	aid   map[string]bool // the Aid each URL was fetched with
 }
 
-func (f *fakePictures) picture(_ context.Context, url string) (picture.Picture, error) {
+func (f *fakePictures) picture(_ context.Context, src picture.Source) (picture.Picture, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	url := src.URL
 	f.urls = append(f.urls, url)
+	if f.aid == nil {
+		f.aid = map[string]bool{}
+	}
+	f.aid[url] = src.Aid
 	size := f.size
 	if n, ok := f.sizes[url]; ok {
 		size = n

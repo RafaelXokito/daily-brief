@@ -99,15 +99,44 @@ func TestLogoLike(t *testing.T) {
 		{"narrow original", "https://example.com/a.jpg", noisyPhoto(399, 600), true},
 		{"short original", "https://example.com/a.jpg", noisyPhoto(1200, 299), true},
 		{"just big enough", "https://example.com/a.jpg", noisyPhoto(400, 300), false},
-		{"flat two colours", "https://example.com/share.png", flatLogo(1200, 630), true},
-		{"flat logo saved as JPEG", "https://example.com/share.jpg", asJPEG(t, flatLogo(1200, 630)), true},
+		{"flat square", "https://example.com/share.png", flatLogo(800, 800), true},
+		{"flat nearly square", "https://example.com/share.png", flatLogo(800, 1000), true},
+		{"flat wide banner", "https://example.com/share.png", flatLogo(1600, 400), true},
+		{"flat square saved as JPEG", "https://example.com/share.jpg", asJPEG(t, flatLogo(800, 800)), true},
+		{"flat 4:3 chart", "https://example.com/chart.png", flatLogo(800, 600), false},
+		{"flat 1.9:1 card", "https://example.com/share.png", flatLogo(1200, 630), false},
+		{"flat tall diagram", "https://example.com/route.png", flatLogo(600, 1000), false},
 		{"photo saved as JPEG", "https://example.com/harbour.jpg", asJPEG(t, photo), false},
 		{"no url", "", photo, false},
 		{"bad url", "://", photo, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := logoLike(tc.url, tc.img); got != tc.want {
+			if got := logoLike(Source{URL: tc.url}, tc.img); got != tc.want {
 				t.Errorf("logoLike(%q) = %v, want %v", tc.url, got, tc.want)
+			}
+		})
+	}
+}
+
+// A picture the editor asked for to aid understanding is small only by
+// its URL or its size, never for flat colours.
+func TestLogoLikeAid(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		img  image.Image
+		want bool
+	}{
+		{"flat square", "https://example.com/share.png", flatLogo(800, 800), false},
+		{"flat wide banner", "https://example.com/share.png", flatLogo(1600, 400), false},
+		{"flat 4:3 chart", "https://example.com/chart.png", flatLogo(800, 600), false},
+		{"logo in the file name", "https://example.com/logo.png", flatLogo(800, 800), true},
+		{"small original", "https://example.com/a.png", noisyPhoto(300, 300), true},
+		{"photo", "https://example.com/harbour.jpg", noisyPhoto(1200, 800), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := logoLike(Source{URL: tc.url, Aid: true}, tc.img); got != tc.want {
+				t.Errorf("logoLike(%q, aid) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
 	}
@@ -116,24 +145,31 @@ func TestLogoLike(t *testing.T) {
 // Transparent logos count their transparent field as white, so a
 // two-colour mark on transparency is flat too.
 func TestLogoLikeTransparentField(t *testing.T) {
-	img := image.NewNRGBA(image.Rect(0, 0, 1200, 630))
+	img := image.NewNRGBA(image.Rect(0, 0, 630, 630))
 	for y := 200; y < 400; y++ {
-		for x := 400; x < 800; x++ {
+		for x := 200; x < 400; x++ {
 			img.Set(x, y, color.NRGBA{200, 30, 30, 255})
 		}
 	}
-	if !logoLike("https://example.com/share.png", img) {
+	if !logoLike(Source{URL: "https://example.com/share.png"}, img) {
 		t.Error("a two-colour mark on transparency is not logo-like")
 	}
 }
 
 func TestPrepareSmallPictureCapped(t *testing.T) {
-	out, err := Prepare(encodePNG(t, flatLogo(1200, 630)), "https://example.com/share.png")
+	out, err := Prepare(encodePNG(t, flatLogo(800, 800)), Source{URL: "https://example.com/share.png"})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	if !out.Small {
 		t.Error("a flat logo is not small")
+	}
+	aid, err := Prepare(encodePNG(t, flatLogo(800, 800)), Source{URL: "https://example.com/share.png", Aid: true})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if b := decodeJPEG(t, aid.Data).Bounds(); aid.Small || b.Dx() != MaxWidth {
+		t.Errorf("aid picture small %v, width %d; want large, %d wide", aid.Small, b.Dx(), MaxWidth)
 	}
 	if b := decodeJPEG(t, out.Data).Bounds(); b.Dx() != SmallWidth {
 		t.Errorf("width %d, want %d", b.Dx(), SmallWidth)
@@ -141,7 +177,7 @@ func TestPrepareSmallPictureCapped(t *testing.T) {
 }
 
 func TestPrepareSmallByURLCapped(t *testing.T) {
-	out, err := Prepare(encodePNG(t, noisyPhoto(1000, 600)), "https://example.com/logo.png")
+	out, err := Prepare(encodePNG(t, noisyPhoto(1000, 600)), Source{URL: "https://example.com/logo.png"})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -151,7 +187,7 @@ func TestPrepareSmallByURLCapped(t *testing.T) {
 }
 
 func TestPreparePhotoStaysLarge(t *testing.T) {
-	out, err := Prepare(encodePNG(t, noisyPhoto(1600, 1000)), "https://example.com/harbour.jpg")
+	out, err := Prepare(encodePNG(t, noisyPhoto(1600, 1000)), Source{URL: "https://example.com/harbour.jpg"})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -165,7 +201,7 @@ func TestPreparePhotoStaysLarge(t *testing.T) {
 
 // A tiny original is small but never enlarged.
 func TestPrepareTinyNotEnlarged(t *testing.T) {
-	out, err := Prepare(encodePNG(t, noisyPhoto(120, 80)), "")
+	out, err := Prepare(encodePNG(t, noisyPhoto(120, 80)), Source{})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}

@@ -114,6 +114,24 @@ func TestPicturesCarrySmall(t *testing.T) {
 	}
 }
 
+// Only a picture shown just for a story that needs one is fetched as an
+// aid, so flat colours cannot make it small; a picture also shown as a
+// lead or front lead is not.
+func TestPicturesAidOnlyForNeedsPicture(t *testing.T) {
+	f := &fakePictures{size: 10_000}
+	in := picturePaper()
+	images := previews(in)
+	images["https://example.com/t1i2"] = images["https://example.com/t1i0"] // shared with chapter two's lead
+	pictureRun(f).pictures(in, images)
+	want := map[string]bool{
+		"https://example.com/t0i0.jpg": false, "https://example.com/t1i1.jpg": false,
+		"https://example.com/t1i0.jpg": false, "https://example.com/t0i1.jpg": true,
+	}
+	if !maps.Equal(f.aid, want) {
+		t.Errorf("aid by URL %v, want %v", f.aid, want)
+	}
+}
+
 // End to end: a logo-like lead picture prints small on the front page,
 // even as the main picture, and in its chapter.
 func TestRunSmallPicture(t *testing.T) {
