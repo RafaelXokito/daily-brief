@@ -52,13 +52,17 @@ type paperFlags struct {
 }
 
 // paperCommand is `daily-brief paper`: progress and warnings go to
-// stderr, the report line to stdout. Its error carries paper.ExitCode.
+// stderr, the report line to stdout. The line is printed whenever the run
+// got as far as a build or delivery, even when it then failed. Its error
+// carries paper.ExitCode.
 func paperCommand(ctx context.Context, cfg config.Config, f paperFlags, stdout, stderr io.Writer) error {
 	rep, err := runPaper(ctx, cfg, f, stderr)
+	if rep.Date != "" {
+		_, _ = fmt.Fprintln(stdout, rep.Line())
+	}
 	if err != nil {
 		return &exitError{code: paper.ExitCode(err), err: err}
 	}
-	_, _ = fmt.Fprintln(stdout, rep.Line())
 	return nil
 }
 
@@ -70,21 +74,31 @@ func runPaper(ctx context.Context, cfg config.Config, f paperFlags, stderr io.Wr
 	if total <= 0 {
 		return paper.Report{}, fmt.Errorf("%w: set paper.token_budget or -budget to a positive number of tokens (0, auto, is not allowed for the paper)", paper.ErrNoBudget)
 	}
-	var deliverer paper.Deliverer
-	if !f.noDeliver {
-		client, err := dropboxClient(cfg)
-		if err != nil {
-			return paper.Report{}, err
-		}
-		deliverer = paper.NewDropboxDeliverer(&client, cfg.Paper.FolderOrDefault(), cfg.Paper.TitleOrDefault())
-	}
-	backend, err := brief.NewBackend(ctx, cfg)
+	deps, err := paperDeps(ctx, cfg, f)
 	if err != nil {
 		return paper.Report{}, err
 	}
 	return paper.Run(ctx, cfg,
-		paper.Options{Budget: f.budget, Refresh: f.refresh, NoDeliver: f.noDeliver, Log: stderr},
-		paper.Deps{Backend: backend, Deliverer: deliverer})
+		paper.Options{Budget: f.budget, Refresh: f.refresh, NoDeliver: f.noDeliver, Log: stderr}, deps)
+}
+
+// paperDeps builds the Claude backend and, unless -no-deliver, the Dropbox
+// deliverer a paper run talks to; tests replace it.
+var paperDeps = func(ctx context.Context, cfg config.Config, f paperFlags) (paper.Deps, error) {
+	var deps paper.Deps
+	if !f.noDeliver {
+		client, err := dropboxClient(cfg)
+		if err != nil {
+			return deps, err
+		}
+		deps.Deliverer = paper.NewDropboxDeliverer(&client, cfg.Paper.FolderOrDefault(), cfg.Paper.TitleOrDefault())
+	}
+	backend, err := brief.NewBackend(ctx, cfg)
+	if err != nil {
+		return deps, err
+	}
+	deps.Backend = backend
+	return deps, nil
 }
 
 // dropboxClient is a client with the configured app key and the stored

@@ -188,6 +188,7 @@ func (x *run) deliver(s State, data []byte) error {
 // finished EPUB.
 func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	j, researchSpent := x.journal(split.Research)
+	x.r.Spent = researchSpent
 	// A cancelled run (SIGTERM, timeout) must not save a half-made book
 	// that a later run would redeliver as the day's edition.
 	if err := x.ctx.Err(); err != nil {

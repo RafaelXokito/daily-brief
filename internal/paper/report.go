@@ -76,6 +76,9 @@ func (r Report) Line() string {
 }
 
 func (r Report) notDelivered() string {
+	if r.File == "" {
+		return "nothing built"
+	}
 	if r.deliveryFailed {
 		return "delivery failed, saved to " + r.File
 	}
