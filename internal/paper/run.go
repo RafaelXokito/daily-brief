@@ -100,6 +100,11 @@ func Run(ctx context.Context, cfg config.Config, o Options, d Deps) (Report, err
 	if err != nil {
 		return Report{}, fmt.Errorf("%w: %v", ErrNoBudget, err)
 	}
+	unlock, err := lockRun(d.Dir)
+	if err != nil {
+		return Report{}, err
+	}
+	defer unlock()
 	now := d.Now()
 	date := now.Format("2006-01-02")
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -115,7 +120,6 @@ func Run(ctx context.Context, cfg config.Config, o Options, d Deps) (Report, err
 	switch x.r.Action {
 	case Skip:
 		x.r.File, x.r.Delivered = filepath.Join(d.Dir, s.File), true
-		x.logf("paper %s: already delivered as %s", date, s.File)
 		return x.r, nil
 	case Redeliver:
 		return x.redeliver(s)
@@ -232,7 +236,7 @@ func (x *run) edition(issue, rebuild int, split Split) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("paper: cover: %w", err)
 	}
-	return epub.Build(epub.Book{Title: title + " " + x.date, Identifier: editionID(x.date, rebuild), Date: x.day, Cover: png, Chapters: pages})
+	return epub.Build(epub.Book{Title: title + " · " + x.day.Format("2 January 2006"), Identifier: editionID(x.date, rebuild), Date: x.day, Cover: png, Chapters: pages})
 }
 
 // journal returns today's journal and what this run spent on it: the
@@ -267,8 +271,13 @@ func (x *run) journal(budget int64) (*brief.Journal, int64) {
 			x.warn(fmt.Sprintf("%s: %s", s.Topic, s.Error))
 		}
 	}
-	if note := j.OvershootNote(); note != "" {
-		x.warn("research: " + note)
+	if over := j.Over(); over > 0 {
+		x.warn(fmt.Sprintf("research went over its share of the paper's budget by %s tokens (%s of %s); the editor gets what is left",
+			HumanTokens(over), HumanTokens(spent), HumanTokens(budget)))
+	}
+	// A cancelled run keeps no journal: a retry would reuse a partial one.
+	if x.ctx.Err() != nil {
+		return j, spent
 	}
 	if err := brief.SaveJournal(j); err != nil && !errors.Is(err, brief.ErrNothingDone) {
 		x.warn(fmt.Sprintf("could not save today's journal: %v", err))

@@ -90,3 +90,12 @@ func TestPaperRoundTrip(t *testing.T) {
 		t.Fatalf("Paper = %+v, want zero", loaded.Paper)
 	}
 }
+
+func TestPaperTitleOrDefaultTrims(t *testing.T) {
+	if got := (Paper{Title: "  Mine  "}).TitleOrDefault(); got != "Mine" {
+		t.Errorf("title = %q, want Mine", got)
+	}
+	if got := (Paper{Title: " \t "}).TitleOrDefault(); got != DefaultPaperTitle {
+		t.Errorf("blank title = %q, want the default", got)
+	}
+}

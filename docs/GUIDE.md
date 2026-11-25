@@ -741,7 +741,7 @@ paper:
 
 `daily-brief paper` refuses to run unless the budget is a positive number, and `0` (auto) is refused.
 `-budget` overrides `paper.token_budget` for one run and must also be positive.
-`daily-brief budget` shows what `paper.token_budget` buys: the research, overview and editor shares.
+`daily-brief budget` shows what `paper.token_budget` buys: the research share (which also pays for the overview) and the editor share, reserved first.
 The title is used in the file name, so it cannot contain a slash or control characters.
 The folder must be an absolute Dropbox path.
 
@@ -820,6 +820,7 @@ paper 2026-11-25: 934k of 1.2M tokens, 41 stories, 28 of 39 sources summarised, 
 ```
 
 With `-no-deliver` the end of the line reads `saved to <path>` instead.
+The line is printed even when the run fails after research, ending `delivery failed, saved to <path>` or, with no stories, `nothing built`.
 
 ### Running it
 
@@ -839,6 +840,8 @@ A same-day rebuild with `-refresh` is uploaded as `The Daily Brief 2026-11-25 (2
 Delivery uploads first, and only after the upload succeeds does it delete older editions.
 It deletes only files whose names match that pattern for the configured title, and never the file it just uploaded.
 Everything else in the folder, such as Kobo's own PDF, is never touched.
+
+Only one run works at a time: a run started while another is in progress exits 1 with "another paper run is in progress".
 
 A second run on the same day without `-refresh` costs nothing.
 If today's paper was already delivered, it does nothing and exits 0.
@@ -898,7 +901,7 @@ Change `OnCalendar` to change the time.
 | Code | Meaning |
 |---|---|
 | 0 | Success, or nothing to do because today's paper was already delivered |
-| 1 | Unexpected error |
+| 1 | Unexpected error, or another paper run is in progress |
 | 2 | Config or budget error, for example `paper.token_budget` is missing, not positive or too small, `paper.dropbox.app_key` or the Dropbox token is missing, or the `claude` CLI cannot be found |
 | 3 | Research produced no stories: nothing was delivered and yesterday's paper stays on the Kobo |
 | 4 | Delivery failed: the book is kept in `~/.local/share/daily-brief/papers/`, and running the command again delivers it without spending tokens |

@@ -51,3 +51,15 @@ func TestRunFrontFactCheck(t *testing.T) {
 		})
 	}
 }
+
+// A front page that falls back counts as one editor fallback.
+func TestRunCountsFrontFallback(t *testing.T) {
+	f := newFake(1)
+	f.front = "nope"
+
+	p := Run(context.Background(), f, runInput(), bigBudget(), 1)
+
+	if p.Fallbacks != 1 {
+		t.Errorf("fallbacks = %d, want 1 for the front page", p.Fallbacks)
+	}
+}

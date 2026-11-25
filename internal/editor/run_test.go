@@ -246,7 +246,7 @@ func TestRunFrontFallsBackOnBadReply(t *testing.T) {
 	f := newFake(1)
 	f.front = "nope"
 	p := Run(context.Background(), f, runInput(), bigBudget(), 1)
-	if p.Front.CoverLine == "" || p.Fallbacks != 0 {
+	if p.Front.CoverLine == "" || p.Fallbacks != 1 {
 		t.Fatalf("front = %+v fallbacks = %d", p.Front, p.Fallbacks)
 	}
 }

@@ -39,6 +39,7 @@ type runBackend struct {
 	researchMul                int64 // research spends Budget*researchMul/10
 	editorTokens               int64
 	onEditor                   func() // called on each editor pass
+	onResearch                 func() // called on each research pass
 }
 
 func (f *runBackend) Research(_ context.Context, t brief.Task) brief.Result {
@@ -46,6 +47,9 @@ func (f *runBackend) Research(_ context.Context, t brief.Task) brief.Result {
 	defer f.mu.Unlock()
 	f.tasks = append(f.tasks, t)
 	f.research++
+	if f.onResearch != nil {
+		f.onResearch()
+	}
 	if f.researchErr != nil {
 		return brief.Result{Err: f.researchErr, Tokens: 100}
 	}
@@ -746,5 +750,95 @@ func TestRunEditorMarginOnlyForClaudeCode(t *testing.T) {
 				t.Errorf("editor margins %v, want [%d]", got, want)
 			}
 		})
+	}
+}
+
+// A run cancelled during research saves no partial journal that a retry
+// would reuse.
+func TestRunCancelledDuringResearchSavesNoJournal(t *testing.T) {
+	e := newRunEnv(t)
+	e.cfg.Concurrency = 1
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.backend.onResearch = cancel
+
+	_, err := e.runCtx(ctx, Options{})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	if j, err := brief.LoadJournal(runDate); err != nil || j != nil {
+		t.Fatalf("journal saved after cancellation: %v, %v", j, err)
+	}
+}
+
+// The book's title is the paper's title and the long date.
+func TestRunBookTitle(t *testing.T) {
+	e := newRunEnv(t)
+	if _, err := e.run(Options{}); err != nil {
+		t.Fatal(err)
+	}
+	opf := epubFile(t, e.deliver.data[0], "EPUB/content.opf")
+	if want := "<dc:title>The Daily Brief · 25 November 2026</dc:title>"; !bytes.Contains(opf, []byte(want)) {
+		t.Errorf("package document lacks %q:\n%s", want, opf)
+	}
+	if e.deliver.names[0] != "The Daily Brief 2026-11-25.epub" {
+		t.Errorf("file name = %q", e.deliver.names[0])
+	}
+}
+
+// A run that finds today's paper delivered says so once, on the report
+// line, not also in the log.
+func TestRunSkipLogsNothing(t *testing.T) {
+	e := newRunEnv(t)
+	if _, err := e.run(Options{}); err != nil {
+		t.Fatal(err)
+	}
+	e.log.Reset()
+
+	r, err := e.run(Options{})
+
+	if err != nil || r.Action != Skip {
+		t.Fatalf("action %v, err %v", r.Action, err)
+	}
+	if strings.Contains(e.log.String(), "already delivered") {
+		t.Errorf("log repeats the report line: %q", e.log.String())
+	}
+}
+
+// A second run while one holds the lock is refused before any work.
+func TestRunRefusedWhileAnotherRuns(t *testing.T) {
+	e := newRunEnv(t)
+	unlock, err := lockRun(e.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = e.run(Options{})
+
+	if err == nil || !strings.Contains(err.Error(), "another paper run is in progress") || ExitCode(err) != 1 {
+		t.Fatalf("err = %v, exit %d", err, ExitCode(err))
+	}
+	if research, _, _ := e.backend.calls(); research != 0 {
+		t.Fatalf("a refused run researched %d times", research)
+	}
+	unlock()
+	if _, err := e.run(Options{}); err != nil {
+		t.Fatalf("after the lock is released: %v", err)
+	}
+}
+
+// The research overshoot warning names research's share, not the run.
+func TestRunResearchOvershootWarningNamesShare(t *testing.T) {
+	e := newRunEnv(t)
+	e.backend.researchMul = 25
+
+	if _, err := e.run(Options{NoDeliver: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	log := e.log.String()
+	if !strings.Contains(log, "warning: research went over its share of the paper's budget") || strings.Contains(log, "This run went over") {
+		t.Errorf("log: %s", log)
 	}
 }

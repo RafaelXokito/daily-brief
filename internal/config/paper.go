@@ -30,19 +30,21 @@ type Paper struct {
 }
 
 // PaperDropbox is where the paper is delivered. No secret lives here: the
-// app key identifies the app and the token is kept in the keychain.
+// app key identifies the app, and the refresh token is a systemd credential
+// or a file only its owner can read.
 type PaperDropbox struct {
 	AppKey string `yaml:"app_key,omitempty"`
 	// Folder is an absolute Dropbox path; empty means DefaultPaperFolder.
 	Folder string `yaml:"folder,omitempty"`
 }
 
-// TitleOrDefault is the paper title, or DefaultPaperTitle when unset.
+// TitleOrDefault is the paper title without surrounding spaces, or
+// DefaultPaperTitle when it is unset or blank.
 func (p Paper) TitleOrDefault() string {
-	if p.Title == "" {
-		return DefaultPaperTitle
+	if t := strings.TrimSpace(p.Title); t != "" {
+		return t
 	}
-	return p.Title
+	return DefaultPaperTitle
 }
 
 // FolderOrDefault is the Dropbox folder, or DefaultPaperFolder when unset.

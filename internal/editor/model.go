@@ -63,6 +63,6 @@ type Paper struct {
 	Date      time.Time
 	Front     FrontPage
 	Chapters  []Chapter
-	Fallbacks int
+	Fallbacks int // stories that fell back, plus one if the front page did
 	Tokens    int64
 }

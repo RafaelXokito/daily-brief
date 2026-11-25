@@ -214,17 +214,20 @@ func Run(ctx context.Context, b brief.Backend, in Input, budget Budget, concurre
 	wg.Wait()
 
 	p.release()
-	front := FallbackFront(in)
+	front, frontFellBack := FallbackFront(in), true
 	if ctx.Err() == nil {
 		system, input := frontPrompt(in, chapters)
 		if reply, ok := p.pass(ctx, b, newPlan(system, input, frontOutput)); ok {
 			if fp, err := parseFront(reply, chapters); err == nil && checkFront(fp, chapters, itemsByID(in)) {
-				front = fp
+				front, frontFellBack = fp, false
 			}
 		}
 	}
 
 	fallbacks := 0
+	if frontFellBack {
+		fallbacks++
+	}
 	for _, c := range chapters {
 		for _, s := range c.Stories {
 			if s.Fallback {

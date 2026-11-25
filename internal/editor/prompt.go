@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/RafaelXokito/daily-brief/internal/brief"
 )
 
 const chapterSystem = `You are the copy editor of a morning newspaper. You rewrite one chapter's research items as newspaper stories. You never research and never search; you write only from what you are given.
@@ -61,7 +63,7 @@ func chapterPrompt(c ChapterIn) (system, input string) {
 		fmt.Fprintf(&b, "\nITEM %s\nHeadline: %s\nTag: %s\nFacts: %s\nDigest: %s\nSource: %s\n",
 			it.ID, line(it.Headline), line(it.Tag), line(it.Facts), line(it.Prose), line(it.Host))
 		if strings.TrimSpace(it.Article) != "" {
-			fmt.Fprintf(&b, "<article id=%q>\n%s\n</article>\n", it.ID, quote(it.Article))
+			fmt.Fprintf(&b, "<article id=%q>\n%s\n</article>\n", it.ID, quote(brief.StripControl(it.Article)))
 		}
 	}
 	return chapterSystem, b.String()
