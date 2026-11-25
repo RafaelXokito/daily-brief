@@ -78,6 +78,9 @@ func estimateTokens(s string) int64 {
 	return int64(len(s))*2/5 + 1
 }
 
+// EstimateTokens is estimateTokens for other packages.
+func EstimateTokens(s string) int64 { return estimateTokens(s) }
+
 // calibration is what a run has learned about search requests: the most
 // sampling iterations one has taken (at least searchIterations) and the
 // largest result measured (at least initialResult). It only grows, so a
@@ -378,7 +381,13 @@ func measure(iters anthropic.BetaIterationsUsage, turn int64) (window, grown, n 
 }
 
 func (b *apiBackend) Summarize(ctx context.Context, system, input string) Result {
-	params := b.params(4_000, system)
+	return b.Compose(ctx, system, input, 4_000)
+}
+
+// Compose runs a single prompt without tools, with the reply capped at
+// maxOutput tokens.
+func (b *apiBackend) Compose(ctx context.Context, system, input string, maxOutput int64) Result {
+	params := b.params(maxOutput, system)
 	params.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
 	params.Messages = []anthropic.BetaMessageParam{
 		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(input)),

@@ -26,6 +26,14 @@ type Backend interface {
 	Name() string
 }
 
+// Composer is implemented by the real backends: a single prompt without
+// tools whose reply may be long. maxOutput caps the reply's tokens where the
+// provider allows it. It is separate from Backend so test fakes need not
+// implement it.
+type Composer interface {
+	Compose(ctx context.Context, system, input string, maxOutput int64) Result
+}
+
 // Task is one research pass over a topic, planned by the Generator.
 type Task struct {
 	Topic    config.Topic

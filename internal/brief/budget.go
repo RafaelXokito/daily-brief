@@ -146,14 +146,23 @@ func planSpend(provider string, t Task) (tokens, searches int64) {
 	return write, 0
 }
 
+// defaultMarginPercent is the share of a pass's allocation claude-code holds
+// back for overshoot.
+const defaultMarginPercent = 10
+
 // margin is held back beside a pass's allocation for the overshoot of a
 // pass that cannot be stopped mid-run: claude-code's, by 10% plus one search
 // when it may search. The API backend enforces its allocation per request.
 func margin(provider string, alloc int64, search bool) int64 {
+	return marginPct(provider, defaultMarginPercent, alloc, search)
+}
+
+// marginPct is margin with the overshoot share set to pct percent.
+func marginPct(provider string, pct int, alloc int64, search bool) int64 {
 	if provider != "claude-code" {
 		return 0
 	}
-	m := alloc / 10
+	m := alloc * int64(pct) / 100
 	if search {
 		m += ccSearchCost
 	}
@@ -163,13 +172,28 @@ func margin(provider string, alloc int64, search bool) int64 {
 // spendable is the most n passes may be allocated in total out of room,
 // leaving each its margin.
 func spendable(provider string, room int64, n int, search bool) int64 {
+	return spendablePct(provider, defaultMarginPercent, room, n, search)
+}
+
+// spendablePct is spendable with the overshoot share set to pct percent.
+func spendablePct(provider string, pct int, room int64, n int, search bool) int64 {
 	if provider != "claude-code" {
 		return room
 	}
 	if search {
 		room -= int64(n) * ccSearchCost
 	}
-	return room * 10 / 11
+	return room * 100 / int64(100+pct)
+}
+
+// MaxItems is the most items a run of cfg's topics may report: the sum of
+// the per-topic item caps.
+func MaxItems(cfg config.Config) int {
+	total := 0
+	for _, c := range itemCaps(cfg) {
+		total += c
+	}
+	return total
 }
 
 // passNeed is the least free budget a search pass, planned with a context

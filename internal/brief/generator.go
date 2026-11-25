@@ -186,6 +186,9 @@ type Generator struct {
 	partial bool
 	// history is what earlier days reported, per topic, loaded by Run.
 	history map[string][]Reported
+	// marginPercent is claude-code's overshoot margin, a percent of each
+	// pass's allocation.
+	marginPercent int
 }
 
 // NewGenerator resolves an auto (0) token budget to the baseline. Its
@@ -194,7 +197,7 @@ type Generator struct {
 func NewGenerator(cfg config.Config, backend Backend) *Generator {
 	cfg = effective(cfg)
 	ResolveBudget(&cfg)
-	return &Generator{backend: backend, cfg: cfg, caps: itemCaps(cfg), partial: len(cfg.AllTopics) > len(cfg.Topics)}
+	return &Generator{backend: backend, cfg: cfg, caps: itemCaps(cfg), partial: len(cfg.AllTopics) > len(cfg.Topics), marginPercent: defaultMarginPercent}
 }
 
 // NewJournal returns an empty journal with the budget split across topics.
@@ -253,12 +256,20 @@ func (g *Generator) need(cal *calibration, i int, prior string) int64 {
 	return max(passCost(p, planWindowFor(g.cfg)), cal.firstSearch(t))
 }
 
+// WithMarginPercent sets the share of each pass's allocation held back for
+// overshoot (default 10). It affects claude-code only: the API backend
+// enforces its allocation per request.
+func (g *Generator) WithMarginPercent(pct int) *Generator {
+	g.marginPercent = pct
+	return g
+}
+
 func (g *Generator) margin(alloc int64, search bool) int64 {
-	return margin(g.cfg.Provider.Type, alloc, search)
+	return marginPct(g.cfg.Provider.Type, g.marginPercent, alloc, search)
 }
 
 func (g *Generator) spendable(room int64, n int, search bool) int64 {
-	return spendable(g.cfg.Provider.Type, room, n, search)
+	return spendablePct(g.cfg.Provider.Type, g.marginPercent, room, n, search)
 }
 
 // pool is the topic budget shared by concurrent passes. A pass holds its

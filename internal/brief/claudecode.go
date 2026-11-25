@@ -58,6 +58,12 @@ func (b *claudeCodeBackend) Summarize(ctx context.Context, system, input string)
 	return b.run(ctx, system, input, "", int64(len(system)+len(input))/3+4_000)
 }
 
+// Compose runs a single prompt without tools, planned to spend the prompt
+// plus maxOutput tokens.
+func (b *claudeCodeBackend) Compose(ctx context.Context, system, input string, maxOutput int64) Result {
+	return b.run(ctx, system, input, "", estimateTokens(system+input)+maxOutput)
+}
+
 // run runs one prompt; budget is what the pass planned to spend, counted as
 // spent when the CLI's usage cannot be read.
 func (b *claudeCodeBackend) run(ctx context.Context, system, prompt, tools string, budget int64) Result {
