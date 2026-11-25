@@ -170,13 +170,15 @@ func TestRunFallsBackOnFailedFactCheck(t *testing.T) {
 }
 
 // frontMargin is the front page's reservation for in.
-func frontMargin(in Input) int64 {
+func frontMargin(in Input) int64 { return frontWithMargin(in, 20) }
+
+func frontWithMargin(in Input, pct int) int64 {
 	var fb []Chapter
 	for _, c := range in.Chapters {
 		fb = append(fb, fallbackChapter(c))
 	}
 	fs, fi := frontPrompt(in, fb)
-	return withMargin(newPlan(fs, fi, frontOutput).planned, 20)
+	return withMargin(newPlan(fs, fi, frontOutput).planned, pct)
 }
 
 func TestRunSkipsPassThatDoesNotFit(t *testing.T) {
@@ -287,11 +289,22 @@ func TestRunReservesFrontPage(t *testing.T) {
 
 func TestRunClampsNegativeMargin(t *testing.T) {
 	in := runInput()
+	in.Chapters = in.Chapters[:1]
 	need := chapterPlan(in.Chapters[0]).planned
+	// An unclamped -50% margin would claim need/2, which fits; clamped to
+	// zero the claim is need, which does not fit one token short.
 	f := newFake(1)
-	Run(context.Background(), f, in, Budget{Tokens: need, MarginPct: -50}, 1)
-	if len(f.calls) == 0 {
-		t.Fatalf("negative margin must act as zero: chapter 1 should fit exactly")
+	Run(context.Background(), f, in, Budget{Tokens: need - 1 + frontWithMargin(in, 0), MarginPct: -50}, 1)
+	for _, c := range f.calls {
+		if c == "chapter" {
+			t.Fatalf("chapter pass ran although its planned cost exceeds the budget: %v", f.calls)
+		}
+	}
+	// And it does run with exactly its planned cost.
+	g := newFake(1)
+	Run(context.Background(), g, in, Budget{Tokens: need + frontWithMargin(in, 0), MarginPct: -50}, 1)
+	if len(g.calls) == 0 || g.calls[0] != "chapter" {
+		t.Fatalf("chapter should fit: %v", g.calls)
 	}
 }
 
