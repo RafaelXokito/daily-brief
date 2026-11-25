@@ -1,0 +1,26 @@
+@font-face { font-family: "Fell"; font-style: normal; font-weight: normal; src: url(fonts/IMFeENrm28P.ttf); }
+@font-face { font-family: "Fell"; font-style: italic; font-weight: normal; src: url(fonts/IMFeENit28P.ttf); }
+@font-face { font-family: "Fell SC"; font-style: normal; font-weight: normal; src: url(fonts/IMFeENsc28P.ttf); }
+@font-face { font-family: "Fraktur"; font-style: normal; font-weight: normal; src: url(fonts/UnifrakturMaguntia-Book.ttf); }
+
+body { font-family: "Fell", serif; color: #2a2318; line-height: 1.45; margin: 0 4%; }
+body.cover { margin: 0; padding: 0; }
+.coverpage { text-align: center; margin: 0; padding: 0; }
+.coverpage img { max-width: 100%; max-height: 100%; }
+p { margin: 0 0 0.6em 0; text-align: justify; }
+a { color: #2f5a3a; text-decoration: none; }
+.chap { font-family: "Fell SC", serif; text-align: center; letter-spacing: 0.2em; color: #2f5a3a; margin-top: 2.5em; font-size: 0.9em; }
+h1 { font-family: "Fell", serif; font-style: italic; font-weight: normal; text-align: center; font-size: 1.7em; margin: 0.2em 0 0.1em 0; page-break-before: avoid; }
+.fl { text-align: center; color: #2f5a3a; font-size: 1.4em; margin-bottom: 1.4em; }
+h2.story { font-family: "Fell SC", serif; font-weight: normal; font-size: 1.2em; margin: 0.4em 0 0.1em 0; text-align: left; }
+h2.tier { font-family: "Fell SC", serif; font-weight: normal; text-align: center; letter-spacing: 0.15em; color: #8a1c1c; font-size: 1em; margin: 1.4em 0 0.6em 0; border-top: 3px double #2a2318; border-bottom: 3px double #2a2318; padding: 0.2em 0; }
+h3.story { font-family: "Fell SC", serif; font-weight: normal; font-size: 1.05em; margin: 1em 0 0.3em 0; text-align: left; }
+.tag { font-family: "Fell SC", serif; font-size: 0.8em; letter-spacing: 0.15em; color: #2f5a3a; margin: 0; }
+.tag.act { color: #8a1c1c; }
+.standfirst { font-style: italic; font-size: 0.95em; margin-bottom: 0.4em; text-align: left; }
+.dateline { font-family: "Fell SC", serif; font-size: 0.85em; letter-spacing: 0.1em; margin-bottom: 0.3em; text-align: left; }
+.drop::first-letter { float: left; font-family: "Fell SC", serif; font-size: 3.2em; line-height: 0.8; padding: 0.08em 0.1em 0 0; color: #2f5a3a; }
+.srcline { text-align: right; font-style: italic; font-size: 0.85em; }
+.sep { text-align: center; color: #2f5a3a; margin: 1em 0; }
+.hl { text-indent: 0; }
+.center { text-align: center; }

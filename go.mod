@@ -11,6 +11,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/markusmobius/go-trafilatura v1.12.2
 	github.com/muesli/termenv v0.16.0
+	golang.org/x/image v0.32.0
 	golang.org/x/net v0.41.0
 	golang.org/x/term v0.36.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -1,0 +1,9 @@
+<p class="chap">Colophon</p>
+<h1>Of This Edition</h1>
+<p class="fl">❦</p>
+<p class="center">{{if .Title}}{{.Title}}{{if .Issue}}, number {{.Issue}}{{end}}.<br/>{{end}}Edition of {{.Date}}.</p>
+{{if .Model}}<p class="center">Edited by {{.Model}}.</p>
+{{end}}<p class="center">{{.Spent}} tokens spent{{if .Budget}} of a budget of {{.Budget}}{{end}}{{if .Over}}, over by {{.Over}}{{end}}.</p>
+<p class="center">Sources summarised: {{.Summarised}}. Sources that failed: {{.Failed}}. Stories set by the editor's fallback: {{.Fallbacks}}.</p>
+{{if .Cut}}<p class="center">Topics failed or cut: {{.Cut}}.</p>
+{{end}}<p class="center">Set in IM Fell English and UnifrakturMaguntia, under the SIL Open Font License.</p>

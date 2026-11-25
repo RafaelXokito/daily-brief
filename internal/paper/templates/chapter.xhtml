@@ -1,0 +1,16 @@
+{{define "story"}}{{if .Act}}<p class="tag act">Act now</p>
+{{end}}{{if .Standfirst}}<p class="standfirst">{{.Standfirst}}</p>
+{{end}}{{if .Dateline}}<p class="dateline">{{.Dateline}}</p>
+{{end}}{{range $i, $p := .Paragraphs}}{{if and $.Drop (eq $i 0)}}<p class="drop">{{$p}}</p>
+{{else}}<p>{{$p}}</p>
+{{end}}{{end}}{{if .Host}}<p class="srcline">From {{.Host}}</p>
+{{end}}{{end -}}
+<p class="chap">{{.Heading}}</p>
+<h1>{{.Title}}</h1>
+<p class="fl">❧</p>
+{{range $i, $s := .Main}}{{if $i}}<p class="sep">⁂</p>
+{{end}}<h2 class="story" id="{{.ID}}">{{.Headline}}</h2>
+{{template "story" .}}{{end}}{{if .Briefs}}<h2 class="tier">In Brief</h2>
+{{range $i, $s := .Briefs}}{{if $i}}<p class="sep">⁂</p>
+{{end}}<h3 class="story" id="{{.ID}}">{{.Headline}}</h3>
+{{template "story" .}}{{end}}{{end}}
