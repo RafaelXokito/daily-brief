@@ -61,6 +61,12 @@ func TestPublicIP(t *testing.T) {
 		{"127.0.0.1", false}, {"::1", false}, {"10.0.0.1", false}, {"172.16.0.1", false},
 		{"192.168.1.1", false}, {"169.254.1.1", false}, {"fe80::1", false}, {"100.64.0.1", false},
 		{"0.0.0.0", false}, {"224.0.0.1", false},
+		{"::ffff:127.0.0.1", false}, {"::ffff:10.0.0.1", false}, {"fd00::1", false}, {"fc00::1", false},
+		{"169.254.169.254", false}, {"64:ff9b::7f00:1", false}, {"64:ff9b::a9fe:a9fe", false},
+		{"64:ff9b:1::1", false}, {"2002:7f00:1::", false}, {"::7f00:1", false},
+		{"0.1.2.3", false}, {"192.0.0.1", false}, {"198.18.0.1", false}, {"240.0.0.1", false},
+		{"192.0.2.1", false}, {"198.51.100.1", false}, {"203.0.113.1", false},
+		{"2001:db8::1", false}, {"fec0::1", false},
 		{"93.184.216.34", true}, {"2606:4700::1111", true},
 	}
 	for _, c := range cases {

@@ -18,10 +18,31 @@ func PublicIP(ip net.IP) bool {
 	if !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() {
 		return false
 	}
-	return !cgnat.Contains(addr)
+	for _, p := range denied {
+		if p.Contains(addr) {
+			return false
+		}
+	}
+	return true
 }
 
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+// denied lists ranges IsGlobalUnicast accepts but that are not public hosts.
+// It includes the IPv6 forms that embed an IPv4 address (NAT64, 6to4,
+// IPv4-compatible), which could otherwise reach internal IPv4 hosts.
+var denied = mustPrefixes(
+	"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4",
+	"192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24",
+	"2001:db8::/32", "fec0::/10",
+	"64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "::/96",
+)
+
+func mustPrefixes(ss ...string) []netip.Prefix {
+	out := make([]netip.Prefix, len(ss))
+	for i, s := range ss {
+		out[i] = netip.MustParsePrefix(s)
+	}
+	return out
+}
 
 // guardControl is a net.Dialer.Control hook. It sees the resolved address of
 // every connection attempt, so DNS rebinding and redirects cannot get around it.

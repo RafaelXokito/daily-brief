@@ -76,3 +76,26 @@ func TestTooManyRedirects(t *testing.T) {
 		t.Errorf("hits = %d, want 6 (original plus 5 hops)", h)
 	}
 }
+
+func TestLocalhostNameBlockedByDefault(t *testing.T) {
+	s := serve(t, page(400))
+	u := strings.Replace(s.URL, "127.0.0.1", "localhost", 1)
+	a := Articles(context.Background(), []string{u}, Options{})[u]
+	if !errors.Is(a.Err, ErrBlocked) {
+		t.Errorf("err = %v, want ErrBlocked", a.Err)
+	}
+}
+
+func TestRedirectToFileSchemeBlocked(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "file:///etc/passwd", http.StatusFound)
+	}))
+	defer s.Close()
+	a := Articles(context.Background(), []string{s.URL}, Options{AllowIP: allowLoopback})[s.URL]
+	if !errors.Is(a.Err, ErrBlocked) {
+		t.Errorf("err = %v, want ErrBlocked", a.Err)
+	}
+	if a.Text != "" {
+		t.Error("text returned from a blocked redirect")
+	}
+}

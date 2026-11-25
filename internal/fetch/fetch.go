@@ -2,6 +2,7 @@
 package fetch
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,9 +30,13 @@ const (
 )
 
 var (
+	// ErrTooShort means the extracted article has fewer than MinWords words.
 	ErrTooShort = errors.New("article too short")
-	ErrNotHTML  = errors.New("not an HTML page")
-	ErrBlocked  = errors.New("address or scheme not allowed")
+	// ErrNotHTML means the response is not an HTML document.
+	ErrNotHTML = errors.New("not an HTML page")
+	// ErrBlocked means the scheme or the resolved address is not allowed.
+	ErrBlocked = errors.New("address or scheme not allowed")
+	// ErrTooLarge means the body exceeds MaxBytes.
 	ErrTooLarge = errors.New("page too large")
 )
 
@@ -93,7 +98,15 @@ func Articles(ctx context.Context, urls []string, o Options) map[string]Article 
 		}
 		seen[u] = true
 		wg.Add(1)
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Add(-1)
+			mu.Lock()
+			out[u] = Article{Err: ctx.Err()}
+			mu.Unlock()
+			continue
+		}
 		go func(u string) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -170,7 +183,7 @@ func fetchOne(ctx context.Context, client *http.Client, raw string, o Options) A
 	if int64(len(body)) > o.MaxBytes {
 		return Article{Err: fmt.Errorf("%w: over %d bytes", ErrTooLarge, o.MaxBytes)}
 	}
-	res, err := trafilatura.Extract(strings.NewReader(string(body)), trafilatura.Options{OriginalURL: u, ExcludeComments: true})
+	res, err := trafilatura.Extract(bytes.NewReader(body), trafilatura.Options{OriginalURL: u, ExcludeComments: true})
 	if err != nil {
 		return Article{Err: fmt.Errorf("extract: %w", err)}
 	}
@@ -185,8 +198,8 @@ func fetchOne(ctx context.Context, client *http.Client, raw string, o Options) A
 	return Article{Text: text, Words: len(strings.Fields(text))}
 }
 
-// capWords cuts text to at most max words, backing up to the last sentence end.
-func capWords(text string, max int) string {
+// capWords cuts text to at most limit words, backing up to the last sentence end.
+func capWords(text string, limit int) string {
 	count, inWord, cut := 0, false, len(text)
 	for i, r := range text {
 		if unicode.IsSpace(r) {
@@ -194,7 +207,7 @@ func capWords(text string, max int) string {
 			continue
 		}
 		if !inWord {
-			if count == max {
+			if count == limit {
 				cut = i
 				break
 			}
