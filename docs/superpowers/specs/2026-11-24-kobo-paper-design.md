@@ -315,3 +315,13 @@ It never researches and never searches; it only writes from what it is given.
 - Works on a free account; a 400 KB paper was accepted.
 - Instapaper's parser keeps headings, bold, italics and lists, but strips ids, internal links and their link text, and all styling.
 - Instapaper articles on the Kobo have no table of contents.
+
+## Revision 2026-11-25: after the first real edition
+
+Rafael read the first edition built on the home server and asked for four changes (approved design, short form).
+
+- **Work off the front page.** Topics gain `front_page: false` (default true); Rafael's Dev & Security topic sets it. Stories from such topics appear only in their own chapter, urgent ones included. The front page leads with the day's biggest general stories; "Act now" there is kept for non-work urgency.
+- **Source links.** Each story ends with one quiet line: a `[source]` link to the article it summarises, followed by "From <site>". Front-page entries keep linking to their story inside the book. One link per story (each story summarises one article); fallback stories link their item's URL.
+- **A reading flow for The Day in Brief.** Leads first (headline, standfirst, two short paragraphs, "continued in Of <Topic>" link), separated by ⁂. Then an "In Brief" section grouped under small-caps topic headings in chapter order, a thin rule between topics, each line linking to its story.
+- **Images, few and small.** One picture per chapter, for its lead story only, from the article's own preview image (og:image or what the extractor reports), fetched with the same public-only guard and size caps as articles. Scaled to at most 800 px wide, JPEG, about 60 KB each, total capped at 1 MB per book. No picture when there is none or it cannot be fetched safely. No images on the front page.
+  This supersedes the non-goal "images from source articles" for chapter lead stories only.
