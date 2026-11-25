@@ -75,8 +75,10 @@ func (b *claudeCodeBackend) run(ctx context.Context, system, prompt, tools strin
 	}
 	defer os.RemoveAll(dir)
 
+	// The prompt goes on stdin: as an argument, a long one (a chapter with
+	// its articles) would pass Linux's 128 KiB per-argument limit.
 	args := []string{
-		"-p", prompt,
+		"-p",
 		"--output-format", "json",
 		"--model", b.cfg.Model,
 		"--effort", b.cfg.Effort,
@@ -91,6 +93,7 @@ func (b *claudeCodeBackend) run(ctx context.Context, system, prompt, tools strin
 	}
 	cmd := exec.CommandContext(ctx, b.path, args...)
 	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(prompt)
 	// On cancellation, stop waiting for output a child process may still
 	// hold open, so the run cannot hang.
 	cmd.WaitDelay = 5 * time.Second

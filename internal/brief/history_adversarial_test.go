@@ -569,16 +569,14 @@ func TestAPIPromptCarriesHistoryForEveryPassKind(t *testing.T) {
 	}
 }
 
-// fakeClaude writes a fake `claude` CLI that saves each -p prompt into dir
+// fakeClaude writes a fake `claude` CLI that saves each prompt (read from
+// stdin) into dir
 // and answers with a fixed digest and usage. It never calls a model.
 func fakeClaude(t *testing.T, dir string, tokens int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude")
 	script := fmt.Sprintf(`#!/bin/sh
-while [ $# -gt 0 ]; do
-  if [ "$1" = "-p" ]; then printf '%%s' "$2" > "%s/p.$$"; fi
-  shift
-done
+cat > "%s/p.$$"
 echo '{"result":"### Item\\nSomething [s](https://x.example)","is_error":false,"stop_reason":"end_turn","modelUsage":{"m":{"inputTokens":%d,"outputTokens":100,"webSearchRequests":1}}}'
 `, dir, tokens)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
@@ -601,7 +599,7 @@ func capturedPrompts(t *testing.T, dir string) []string {
 	return out
 }
 
-// The claude-code backend's -p prompt of each kind of pass carries the
+// The claude-code backend's prompt of each kind of pass carries the
 // history, before any prior digest.
 func TestClaudeCodePromptCarriesHistoryForEveryPassKind(t *testing.T) {
 	for name, task := range goldenTasks(config.Topic{Name: "A"}) {
