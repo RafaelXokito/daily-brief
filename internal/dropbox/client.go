@@ -24,15 +24,20 @@ const (
 	defaultAPIBase     = "https://api.dropboxapi.com/2"
 	defaultContentBase = "https://content.dropboxapi.com/2"
 
-	maxAttempts    = 3
-	baseBackoff    = time.Second
-	maxErrBody     = 1 << 16
-	tokenSkew      = time.Minute
-	defaultTimeout = 2 * time.Minute
+	maxAttempts     = 3
+	baseBackoff     = time.Second
+	maxResponseBody = 8 << 20
+	maxRetryAfter   = 60 * time.Second
+	listPageLimit   = 100
+	tokenSkew       = time.Minute
+	defaultTimeout  = 2 * time.Minute
 )
 
 // ErrConflict means the upload target already exists (HTTP 409, path/conflict).
 var ErrConflict = errors.New("dropbox: path conflict")
+
+// ErrNotFound means the path (or folder) does not exist (HTTP 409, not_found).
+var ErrNotFound = errors.New("dropbox: path not found")
 
 // Client talks to the Dropbox HTTP API with a PKCE app key and a long-lived
 // refresh token. The zero values of HTTP and the URL fields select defaults.
@@ -44,7 +49,8 @@ type Client struct {
 	mu      sync.Mutex
 	access  string
 	expires time.Time
-	sleep   func(context.Context, time.Duration) error // test hook
+	// Sleep is a test seam for backoff waits; nil means a real context-aware sleep.
+	Sleep func(ctx context.Context, d time.Duration) error
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -62,8 +68,8 @@ func orDefault(v, def string) string {
 }
 
 func (c *Client) doSleep(ctx context.Context, d time.Duration) error {
-	if c.sleep != nil {
-		return c.sleep(ctx, d)
+	if c.Sleep != nil {
+		return c.Sleep(ctx, d)
 	}
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -104,7 +110,7 @@ func (c *Client) Upload(ctx context.Context, path string, data []byte) error {
 // List returns the names of the files (not folders) in folder, following pages.
 func (c *Client) List(ctx context.Context, folder string) ([]string, error) {
 	var names []string
-	endpoint, body := "files/list_folder", map[string]any{"path": folder}
+	endpoint, body := "files/list_folder", map[string]any{"path": folder, "limit": listPageLimit}
 	for {
 		resp, err := c.apiJSON(ctx, endpoint, body)
 		if err != nil {
@@ -155,24 +161,50 @@ func (c *Client) apiJSON(ctx context.Context, endpoint string, body any) ([]byte
 	})
 }
 
-// call obtains an access token, then sends the request built by build with retries.
+// call obtains an access token, then sends the request built by build with
+// retries. An expired or invalid access token is refreshed and retried once.
 func (c *Client) call(ctx context.Context, name string, build func(token string) (*http.Request, error)) ([]byte, error) {
-	tok, err := c.accessToken(ctx)
-	if err != nil {
-		return nil, err
+	for refreshed := false; ; refreshed = true {
+		tok, err := c.accessToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+		status, body, err := c.send(ctx, func() (*http.Request, error) { return build(tok) })
+		if err != nil {
+			return nil, fmt.Errorf("dropbox: %s: %w", name, err)
+		}
+		if status >= 200 && status < 300 {
+			return body, nil
+		}
+		summary := errorField(body, "error_summary")
+		if status == http.StatusUnauthorized && !refreshed && isTokenExpired(summary) {
+			c.clearToken()
+			continue
+		}
+		return nil, statusError(name, status, summary)
 	}
-	status, body, err := c.send(ctx, func() (*http.Request, error) { return build(tok) })
-	if err != nil {
-		return nil, fmt.Errorf("dropbox: %s: %w", name, err)
+}
+
+func isTokenExpired(summary string) bool {
+	return strings.HasPrefix(summary, "invalid_access_token") || strings.HasPrefix(summary, "expired_access_token")
+}
+
+func statusError(name string, status int, summary string) error {
+	if status == http.StatusConflict {
+		switch {
+		case strings.HasPrefix(summary, "path/conflict"):
+			return fmt.Errorf("dropbox: %s: %w (%s)", name, ErrConflict, summary)
+		case strings.HasPrefix(summary, "path_lookup/not_found"), strings.HasPrefix(summary, "path/not_found"):
+			return fmt.Errorf("dropbox: %s: %w (%s)", name, ErrNotFound, summary)
+		}
 	}
-	if status >= 200 && status < 300 {
-		return body, nil
-	}
-	summary := errorField(body, "error_summary")
-	if status == http.StatusConflict && strings.HasPrefix(summary, "path/conflict") {
-		return nil, fmt.Errorf("dropbox: %s: %w (%s)", name, ErrConflict, summary)
-	}
-	return nil, fmt.Errorf("dropbox: %s: HTTP %d %s", name, status, summary)
+	return fmt.Errorf("dropbox: %s: HTTP %d %s", name, status, summary)
+}
+
+func (c *Client) clearToken() {
+	c.mu.Lock()
+	c.access, c.expires = "", time.Time{}
+	c.mu.Unlock()
 }
 
 // send performs the request, retrying 429 and 5xx up to maxAttempts times with
@@ -190,7 +222,7 @@ func (c *Client) send(ctx context.Context, build func() (*http.Request, error)) 
 		var retryAfter time.Duration
 		if err == nil {
 			status = resp.StatusCode
-			body, _ = io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+			body, _ = io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 			retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 			_ = resp.Body.Close()
 		} else if ctx.Err() != nil {
@@ -231,7 +263,7 @@ func parseRetryAfter(v string) time.Duration {
 	if err != nil || n < 0 {
 		return 0
 	}
-	return time.Duration(n) * time.Second
+	return min(time.Duration(n)*time.Second, maxRetryAfter)
 }
 
 // errorField extracts one string field from a JSON error body, never echoing

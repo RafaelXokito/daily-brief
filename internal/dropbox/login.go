@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -33,9 +34,18 @@ func NewPKCE() (verifier, challenge string) {
 	return verifier, base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
+// NewState returns a random OAuth state value that binds the redirect to this login.
+func NewState() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("dropbox: no randomness: " + err.Error())
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
 // AuthURL builds the authorisation URL for the code flow with PKCE, asking for
 // an offline (refresh) token.
-func AuthURL(appKey, challenge, redirect string) string {
+func AuthURL(appKey, challenge, redirect, state string) string {
 	q := url.Values{
 		"client_id":             {appKey},
 		"response_type":         {"code"},
@@ -43,13 +53,15 @@ func AuthURL(appKey, challenge, redirect string) string {
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 		"redirect_uri":          {redirect},
+		"state":                 {state},
 	}
 	return authorizeURL + "?" + q.Encode()
 }
 
 // ParseRedirect extracts the authorisation code from a pasted redirect URL or
-// a bare code. A redirect carrying error= is an error.
-func ParseRedirect(pasted string) (string, error) {
+// a bare code (accepted without state). A pasted URL must carry the matching
+// state, and a redirect carrying error= is an error.
+func ParseRedirect(pasted, state string) (string, error) {
 	s := strings.TrimSpace(pasted)
 	if s == "" {
 		return "", errors.New("dropbox: empty authorisation code")
@@ -61,7 +73,11 @@ func ParseRedirect(pasted string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("dropbox: cannot parse redirect URL: %w", err)
 	}
-	return codeFromQuery(u.Query())
+	q := u.Query()
+	if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1 {
+		return "", errors.New("dropbox: redirect state does not match this login")
+	}
+	return codeFromQuery(q)
 }
 
 func codeFromQuery(q url.Values) (string, error) {
@@ -98,7 +114,7 @@ func ExchangeCode(ctx context.Context, h *http.Client, tokenURL, appKey, code, v
 		RefreshToken string `json:"refresh_token"`
 		Error        string `json:"error"`
 	}
-	_ = json.NewDecoder(io.LimitReader(resp.Body, maxErrBody)).Decode(&tr)
+	_ = json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(&tr)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("dropbox: code exchange: HTTP %d %s", resp.StatusCode, tr.Error)
 	}
@@ -109,10 +125,14 @@ func ExchangeCode(ctx context.Context, h *http.Client, tokenURL, appKey, code, v
 }
 
 // Listen serves one OAuth redirect on addr (default localhost:53682) and
-// returns the authorisation code.
-func Listen(ctx context.Context, addr string) (string, error) {
+// returns the authorisation code. Requests whose state does not match get a
+// 404 and do not end the flow. addr must be a loopback address.
+func Listen(ctx context.Context, addr, state string) (string, error) {
 	if addr == "" {
 		addr = DefaultListenAddr
+	}
+	if err := requireLoopback(addr); err != nil {
+		return "", err
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -126,7 +146,8 @@ func Listen(ctx context.Context, addr string) (string, error) {
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if q.Get("code") == "" && q.Get("error") == "" {
+		if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1 ||
+			(q.Get("code") == "" && q.Get("error") == "") {
 			http.NotFound(w, r) // favicon and other stray requests
 			return
 		}
@@ -154,4 +175,18 @@ func Listen(ctx context.Context, addr string) (string, error) {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
+}
+
+func requireLoopback(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("dropbox: bad listen address %q: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("dropbox: refusing to listen on non-loopback address %q", addr)
 }

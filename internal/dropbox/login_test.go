@@ -29,14 +29,14 @@ func TestPKCE(t *testing.T) {
 }
 
 func TestAuthURL(t *testing.T) {
-	u, err := url.Parse(AuthURL("key", "chal", "http://localhost:53682/"))
+	u, err := url.Parse(AuthURL("key", "chal", "http://localhost:53682/", "ST"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	q := u.Query()
 	want := map[string]string{
 		"client_id": "key", "response_type": "code", "token_access_type": "offline",
-		"code_challenge": "chal", "code_challenge_method": "S256", "redirect_uri": "http://localhost:53682/",
+		"code_challenge": "chal", "code_challenge_method": "S256", "redirect_uri": "http://localhost:53682/", "state": "ST",
 	}
 	for k, v := range want {
 		if q.Get(k) != v {
@@ -53,16 +53,18 @@ func TestParseRedirect(t *testing.T) {
 		in, want string
 		err      bool
 	}{
-		{"http://localhost:53682/?code=abc", "abc", false},
-		{"  http://localhost:53682/?code=abc&state=x \n", "abc", false},
+		{"http://localhost:53682/?code=abc&state=ST", "abc", false},
+		{"  http://localhost:53682/?code=abc&state=ST \n", "abc", false},
+		{"http://localhost:53682/?code=abc", "", true},
+		{"http://localhost:53682/?code=abc&state=OTHER", "", true},
 		{"abc", "abc", false},
-		{"http://localhost:53682/?error=access_denied", "", true},
-		{"http://localhost:53682/?error=access_denied&error_description=no", "", true},
-		{"http://localhost:53682/", "", true},
+		{"http://localhost:53682/?error=access_denied&state=ST", "", true},
+		{"http://localhost:53682/?error=access_denied&error_description=no&state=ST", "", true},
+		{"http://localhost:53682/?state=ST", "", true},
 		{"", "", true},
 	}
 	for _, tc := range cases {
-		got, err := ParseRedirect(tc.in)
+		got, err := ParseRedirect(tc.in, "ST")
 		if (err != nil) != tc.err || got != tc.want {
 			t.Errorf("ParseRedirect(%q) = %q, %v", tc.in, got, err)
 		}
@@ -125,12 +127,12 @@ func TestListen(t *testing.T) {
 	}
 	ch := make(chan res, 1)
 	go func() {
-		c, err := Listen(context.Background(), addr)
+		c, err := Listen(context.Background(), addr, "ST")
 		ch <- res{c, err}
 	}()
 	var body string
 	for i := 0; i < 50; i++ {
-		resp, err := http.Get("http://" + addr + "/?code=XYZ")
+		resp, err := http.Get("http://" + addr + "/?code=XYZ&state=ST")
 		if err == nil {
 			b := make([]byte, 512)
 			n, _ := resp.Body.Read(b)
@@ -149,11 +151,65 @@ func TestListen(t *testing.T) {
 	}
 }
 
+func TestNewState(t *testing.T) {
+	a, b := NewState(), NewState()
+	if len(a) < 16 || a == b {
+		t.Errorf("states %q %q", a, b)
+	}
+}
+
+func TestListenIgnoresWrongState(t *testing.T) {
+	addr := freeAddr(t)
+	done := make(chan string, 1)
+	go func() { c, _ := Listen(context.Background(), addr, "ST"); done <- c }()
+	var wrong int
+	for i := 0; i < 50; i++ {
+		resp, err := http.Get("http://" + addr + "/?error=x&state=EVIL")
+		if err == nil {
+			wrong = resp.StatusCode
+			_ = resp.Body.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if wrong != 404 {
+		t.Fatalf("wrong-state status = %d", wrong)
+	}
+	for _, u := range []string{"/?code=EVIL", "/?code=EVIL&state=bad"} {
+		resp, err := http.Get("http://" + addr + u)
+		if err != nil || resp.StatusCode != 404 {
+			t.Fatalf("%s: %v %v", u, resp, err)
+		}
+		_ = resp.Body.Close()
+	}
+	select {
+	case c := <-done:
+		t.Fatalf("flow ended with %q", c)
+	case <-time.After(100 * time.Millisecond):
+	}
+	resp, err := http.Get("http://" + addr + "/?code=GOOD&state=ST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if c := <-done; c != "GOOD" {
+		t.Errorf("code = %q", c)
+	}
+}
+
+func TestListenRejectsNonLoopback(t *testing.T) {
+	for _, a := range []string{"0.0.0.0:53682", ":53682", "192.168.1.5:53682", "example.com:53682", "bad"} {
+		if _, err := Listen(context.Background(), a, "ST"); err == nil {
+			t.Errorf("%q accepted", a)
+		}
+	}
+}
+
 func TestListenCancelAndError(t *testing.T) {
 	addr := freeAddr(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { _, err := Listen(ctx, addr); done <- err }()
+	go func() { _, err := Listen(ctx, addr, "ST"); done <- err }()
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 	select {
@@ -166,9 +222,9 @@ func TestListenCancelAndError(t *testing.T) {
 	}
 
 	addr = freeAddr(t)
-	go func() { _, err := Listen(context.Background(), addr); done <- err }()
+	go func() { _, err := Listen(context.Background(), addr, "ST"); done <- err }()
 	for i := 0; i < 50; i++ {
-		resp, err := http.Get("http://" + addr + "/?error=access_denied")
+		resp, err := http.Get("http://" + addr + "/?error=access_denied&state=ST")
 		if err == nil {
 			_ = resp.Body.Close()
 			break

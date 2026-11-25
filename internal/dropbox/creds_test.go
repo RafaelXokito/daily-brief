@@ -93,3 +93,29 @@ func TestDefaultTokenPath(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestLoadRefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	write(t, real, "tok", 0o600)
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRefreshToken("", link); err == nil {
+		t.Error("symlink accepted")
+	}
+}
+
+func TestSaveTightensExistingDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cfg")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRefreshToken(filepath.Join(dir, "t"), "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if di, _ := os.Stat(dir); di.Mode().Perm() != 0o700 {
+		t.Errorf("dir mode = %o", di.Mode().Perm())
+	}
+}

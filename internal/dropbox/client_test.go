@@ -73,6 +73,12 @@ func newFake(t *testing.T) (*fakeDropbox, *Client) {
 	return f, c
 }
 
+func (f *fakeDropbox) count(path string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.counts[path]
+}
+
 func (f *fakeDropbox) paths() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -192,8 +198,6 @@ func TestUploadConflict(t *testing.T) {
 func TestListPaging(t *testing.T) {
 	f, c := newFake(t)
 	f.handlers["/2/files/list_folder"] = func(w http.ResponseWriter, r *http.Request, _ int) {
-		b, _ := io.ReadAll(r.Body)
-		_ = b
 		_, _ = w.Write([]byte(`{"entries":[{".tag":"file","name":"a.epub"},{".tag":"folder","name":"sub"}],"has_more":true,"cursor":"CUR"}`))
 	}
 	f.handlers["/2/files/list_folder/continue"] = okJSON(`{"entries":[{".tag":"file","name":"b.pdf"}],"has_more":false,"cursor":"CUR2"}`)
@@ -236,7 +240,7 @@ func TestTokenCachedPerClient(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n := f.counts["/oauth2/token"]; n != 1 {
+	if n := f.count("/oauth2/token"); n != 1 {
 		t.Errorf("refresh calls = %d", n)
 	}
 }
@@ -270,7 +274,7 @@ func TestRetriesTransient(t *testing.T) {
 	t.Run("503 then 200", func(t *testing.T) {
 		f, c := newFake(t)
 		var slept []time.Duration
-		c.sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
+		c.Sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
 		f.handlers["/2/files/delete_v2"] = func(w http.ResponseWriter, _ *http.Request, n int) {
 			if n == 1 {
 				w.WriteHeader(503)
@@ -281,17 +285,17 @@ func TestRetriesTransient(t *testing.T) {
 		if err := c.Delete(context.Background(), "/x"); err != nil {
 			t.Fatal(err)
 		}
-		if f.counts["/2/files/delete_v2"] != 2 || len(slept) != 1 || slept[0] != time.Second {
-			t.Errorf("calls=%d slept=%v", f.counts["/2/files/delete_v2"], slept)
+		if f.count("/2/files/delete_v2") != 2 || len(slept) != 1 || slept[0] != time.Second {
+			t.Errorf("calls=%d slept=%v", f.count("/2/files/delete_v2"), slept)
 		}
 	})
 	t.Run("429 Retry-After", func(t *testing.T) {
 		f, c := newFake(t)
 		var slept []time.Duration
-		c.sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
+		c.Sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
 		f.handlers["/2/files/delete_v2"] = func(w http.ResponseWriter, _ *http.Request, n int) {
 			if n == 1 {
-				w.Header().Set("Retry-After", "1")
+				w.Header().Set("Retry-After", "5")
 				w.WriteHeader(429)
 				return
 			}
@@ -300,36 +304,36 @@ func TestRetriesTransient(t *testing.T) {
 		if err := c.Delete(context.Background(), "/x"); err != nil {
 			t.Fatal(err)
 		}
-		if len(slept) != 1 || slept[0] != time.Second {
+		if len(slept) != 1 || slept[0] != 5*time.Second {
 			t.Errorf("slept = %v", slept)
 		}
 	})
 	t.Run("three 503s fail", func(t *testing.T) {
 		f, c := newFake(t)
 		var slept []time.Duration
-		c.sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
+		c.Sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
 		f.handlers["/2/files/delete_v2"] = func(w http.ResponseWriter, _ *http.Request, _ int) { w.WriteHeader(503) }
 		if err := c.Delete(context.Background(), "/x"); err == nil {
 			t.Fatal("expected error")
 		}
-		if f.counts["/2/files/delete_v2"] != 3 || len(slept) != 2 || slept[1] != 2*time.Second {
-			t.Errorf("calls=%d slept=%v", f.counts["/2/files/delete_v2"], slept)
+		if f.count("/2/files/delete_v2") != 3 || len(slept) != 2 || slept[1] != 2*time.Second {
+			t.Errorf("calls=%d slept=%v", f.count("/2/files/delete_v2"), slept)
 		}
 	})
 	t.Run("400 no retry", func(t *testing.T) {
 		f, c := newFake(t)
-		c.sleep = func(context.Context, time.Duration) error { t.Error("slept"); return nil }
+		c.Sleep = func(context.Context, time.Duration) error { t.Error("slept"); return nil }
 		f.handlers["/2/files/delete_v2"] = func(w http.ResponseWriter, _ *http.Request, _ int) { w.WriteHeader(400) }
 		if err := c.Delete(context.Background(), "/x"); err == nil {
 			t.Fatal("expected error")
 		}
-		if f.counts["/2/files/delete_v2"] != 1 {
-			t.Errorf("calls = %d", f.counts["/2/files/delete_v2"])
+		if f.count("/2/files/delete_v2") != 1 {
+			t.Errorf("calls = %d", f.count("/2/files/delete_v2"))
 		}
 	})
 	t.Run("upload body resent on retry", func(t *testing.T) {
 		f, c := newFake(t)
-		c.sleep = func(context.Context, time.Duration) error { return nil }
+		c.Sleep = func(context.Context, time.Duration) error { return nil }
 		f.handlers["/2/files/upload"] = func(w http.ResponseWriter, r *http.Request, n int) {
 			if n == 1 {
 				w.WriteHeader(500)
@@ -341,6 +345,8 @@ func TestRetriesTransient(t *testing.T) {
 			t.Fatal(err)
 		}
 		var bodies []string
+		f.mu.Lock()
+		defer f.mu.Unlock()
 		for _, r := range f.reqs {
 			if r.Path == "/2/files/upload" {
 				bodies = append(bodies, string(r.Body))
@@ -350,4 +356,98 @@ func TestRetriesTransient(t *testing.T) {
 			t.Errorf("bodies = %q", bodies)
 		}
 	})
+}
+
+func TestRetryAfterCapped(t *testing.T) {
+	f, c := newFake(t)
+	var slept []time.Duration
+	c.Sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
+	f.handlers["/2/files/delete_v2"] = func(w http.ResponseWriter, _ *http.Request, n int) {
+		if n == 1 {
+			w.Header().Set("Retry-After", "86400")
+			w.WriteHeader(429)
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}
+	if err := c.Delete(context.Background(), "/x"); err != nil {
+		t.Fatal(err)
+	}
+	if len(slept) != 1 || slept[0] != time.Minute {
+		t.Errorf("slept = %v", slept)
+	}
+}
+
+func TestListLargePage(t *testing.T) {
+	f, c := newFake(t)
+	var sb strings.Builder
+	sb.WriteString(`{"entries":[`)
+	const n = 1500
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(`{".tag":"file","name":"The Daily Brief 2026-01-01 padding padding padding padding.epub"}`)
+	}
+	sb.WriteString(`],"has_more":false,"cursor":"C"}`)
+	if sb.Len() < 100<<10 {
+		t.Fatalf("fixture too small: %d", sb.Len())
+	}
+	f.handlers["/2/files/list_folder"] = okJSON(sb.String())
+	got, err := c.List(context.Background(), "/f")
+	if err != nil || len(got) != n {
+		t.Fatalf("got %d names, %v", len(got), err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(f.find("/2/files/list_folder").Body, &body); err != nil || body["limit"] != float64(100) {
+		t.Errorf("list body = %s", f.find("/2/files/list_folder").Body)
+	}
+}
+
+func TestNotFound(t *testing.T) {
+	for _, summary := range []string{"path_lookup/not_found/..", "path/not_found/.."} {
+		f, c := newFake(t)
+		h := func(w http.ResponseWriter, _ *http.Request, _ int) {
+			w.WriteHeader(409)
+			_, _ = w.Write([]byte(`{"error_summary":"` + summary + `"}`))
+		}
+		f.handlers["/2/files/delete_v2"] = h
+		f.handlers["/2/files/list_folder"] = h
+		if err := c.Delete(context.Background(), "/x"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Delete %s: %v", summary, err)
+		}
+		if _, err := c.List(context.Background(), "/x"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("List %s: %v", summary, err)
+		}
+	}
+}
+
+func TestExpiredTokenRefreshedOnce(t *testing.T) {
+	f, c := newFake(t)
+	f.handlers["/2/files/delete_v2"] = func(w http.ResponseWriter, _ *http.Request, n int) {
+		if n == 1 {
+			w.WriteHeader(401)
+			_, _ = w.Write([]byte(`{"error_summary":"expired_access_token/.."}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}
+	if err := c.Delete(context.Background(), "/x"); err != nil {
+		t.Fatal(err)
+	}
+	if f.count("/oauth2/token") != 2 || f.count("/2/files/delete_v2") != 2 {
+		t.Errorf("token=%d delete=%d", f.count("/oauth2/token"), f.count("/2/files/delete_v2"))
+	}
+	// a persistent 401 is retried only once
+	f2, c2 := newFake(t)
+	f2.handlers["/2/files/delete_v2"] = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		w.WriteHeader(401)
+		_, _ = w.Write([]byte(`{"error_summary":"invalid_access_token/.."}`))
+	}
+	if err := c2.Delete(context.Background(), "/x"); err == nil {
+		t.Fatal("expected error")
+	}
+	if f2.count("/2/files/delete_v2") != 2 {
+		t.Errorf("delete calls = %d", f2.count("/2/files/delete_v2"))
+	}
 }

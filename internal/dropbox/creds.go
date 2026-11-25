@@ -3,10 +3,12 @@ package dropbox
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // CredentialName is the systemd credential holding the refresh token.
@@ -25,14 +27,19 @@ func LoadRefreshToken(credDir, fallback string) (string, error) {
 			return "", fmt.Errorf("dropbox: read credential: %w", err)
 		}
 	}
-	fi, err := os.Stat(fallback)
+	f, err := openNoFollow(fallback)
 	if err != nil {
 		return "", fmt.Errorf("dropbox: no refresh token (run `daily-brief dropbox login`): %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("dropbox: stat %s: %w", fallback, err)
 	}
 	if fi.Mode().Perm()&0o077 != 0 {
 		return "", fmt.Errorf("dropbox: %s is readable by group or others (mode %04o); run: chmod 600 %s", fallback, fi.Mode().Perm(), fallback)
 	}
-	b, err := os.ReadFile(fallback)
+	b, err := io.ReadAll(io.LimitReader(f, 1<<16))
 	if err != nil {
 		return "", fmt.Errorf("dropbox: read %s: %w", fallback, err)
 	}
@@ -52,6 +59,9 @@ func SaveRefreshToken(path, token string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("dropbox: create %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("dropbox: secure %s: %w", dir, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".dropbox.token-*")
 	if err != nil {
@@ -73,7 +83,20 @@ func SaveRefreshToken(path, token string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.Close() }()
+	return d.Sync()
+}
+
+// openNoFollow opens path read-only, refusing to follow a symlink on the final component.
+func openNoFollow(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 }
 
 // DefaultTokenPath is ~/.config/daily-brief/dropbox.token.
