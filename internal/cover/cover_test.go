@@ -8,9 +8,12 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/font"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/golden.png")
@@ -78,8 +81,15 @@ func TestRenderGolden(t *testing.T) {
 			}
 		}
 	}
-	if frac := float64(diff) / float64(total); frac >= 0.005 {
+	frac := float64(diff) / float64(total)
+	if frac >= 0.005 {
 		t.Errorf("%d of %d pixels (%.2f%%) differ from the golden, want under 0.5%%", diff, total, frac*100)
+	}
+	// The render is pure Go and deterministic; the tight bound only leaves
+	// room for float differences across CPU architectures, and catches a
+	// 1px shift of any text line or ornament.
+	if frac >= 0.0001 {
+		t.Errorf("%d of %d pixels (%.4f%%) differ from the golden, want under 0.01%%", diff, total, frac*100)
 	}
 }
 
@@ -111,7 +121,7 @@ func TestRenderDiffersByContent(t *testing.T) {
 }
 
 func TestFitLeadShort(t *testing.T) {
-	size, lines := fitLead("Short", leadWidth)
+	size, lines := fit(t, "Short")
 	if size != 66 || len(lines) != 1 || lines[0] != "Short" {
 		t.Errorf("fitLead(Short) = %v, %q, want 66, [Short]", size, lines)
 	}
@@ -122,7 +132,7 @@ func TestFitLeadWraps(t *testing.T) {
 	if n := len(strings.Fields(lead)); n != 20 {
 		t.Fatalf("fixture has %d words, want 20", n)
 	}
-	size, lines := fitLead(lead, leadWidth)
+	size, lines := fit(t, lead)
 	if len(lines) < 2 || len(lines) > 3 {
 		t.Errorf("got %d lines, want 2 or 3: %q", len(lines), lines)
 	}
@@ -137,7 +147,7 @@ func TestFitLeadWraps(t *testing.T) {
 
 func TestFitLeadShrinks(t *testing.T) {
 	lead := strings.Repeat("several words that take room ", 5)
-	size, lines := fitLead(lead, leadWidth)
+	size, lines := fit(t, lead)
 	if size >= 66 || size < 44 {
 		t.Errorf("size %v, want shrunk below 66 and at least 44", size)
 	}
@@ -152,7 +162,7 @@ func TestFitLeadShrinks(t *testing.T) {
 
 func TestFitLeadTruncates(t *testing.T) {
 	lead := strings.TrimSpace(strings.Repeat("word ", 200))
-	size, lines := fitLead(lead, leadWidth)
+	size, lines := fit(t, lead)
 	if size != 44 {
 		t.Errorf("size %v, want 44", size)
 	}
@@ -167,7 +177,7 @@ func TestFitLeadTruncates(t *testing.T) {
 
 func assertFits(t *testing.T, size float64, lines []string, width int) {
 	t.Helper()
-	f := face("fell-italic", size)
+	f := mustFace(t, "fell-italic", size)
 	for _, l := range lines {
 		if w := measure(f, l, 0); w > width {
 			t.Errorf("line %q is %d px wide, want at most %d", l, w, width)
@@ -205,5 +215,106 @@ func TestTopicsLine(t *testing.T) {
 		if got := topicsLine(tt.in); got != tt.want {
 			t.Errorf("topicsLine(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func fit(t *testing.T, lead string) (float64, []string) {
+	t.Helper()
+	size, lines, err := fitLead(lead, leadWidth)
+	if err != nil {
+		t.Fatalf("fitLead: %v", err)
+	}
+	return size, lines
+}
+
+func mustFace(t *testing.T, name string, size float64) font.Face {
+	t.Helper()
+	f, err := face(name, size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// A lead that takes four lines at 46px but three at 44px must be set at
+// 44px whole, not truncated.
+func TestFitLeadTriesTheSmallestSize(t *testing.T) {
+	at46, at44 := mustFace(t, "fell-italic", 46), mustFace(t, "fell-italic", leadMin)
+	lead := ""
+	for n := 1; n < 200; n++ {
+		candidate := strings.TrimSpace(strings.Repeat("a word ", n))
+		if len(wrap(at46, candidate, 0, leadWidth)) == 4 && len(wrap(at44, candidate, 0, leadWidth)) == 3 {
+			lead = candidate
+			break
+		}
+	}
+	if lead == "" {
+		t.Fatal("no fixture needs four lines at 46px and three at 44px")
+	}
+	size, lines := fit(t, lead)
+	if size != leadMin || len(lines) != 3 || strings.Join(lines, " ") != lead {
+		t.Errorf("fitLead = %v, %q, want 44 and the whole lead in three lines", size, lines)
+	}
+}
+
+func TestTitleLines(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"", []string{"The Daily", "Brief"}},
+		{"The Daily Brief", []string{"The Daily", "Brief"}},
+		{"Gazette", []string{"Gazette"}},
+		{"Le Brief Quotidien", []string{"Le Brief", "Quotidien"}},
+		{"  The\tMorning\x00 Post ", []string{"The Morning", "Post"}},
+		{"Morning Post", []string{"Morning", "Post"}},
+	}
+	for _, tt := range tests {
+		if got := titleLines(tt.in); !slices.Equal(got, tt.want) {
+			t.Errorf("titleLines(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestFitTitle(t *testing.T) {
+	tests := []struct {
+		title   string
+		maxSize float64
+	}{
+		{"", nameSize},
+		{"The Daily Brief", nameSize},
+		{"The Extraordinarily Long Morning Chronicle of Absolutely Everything", nameSize - 1},
+		{"Supercalifragilisticexpialidocious", nameSize - 1},
+	}
+	for _, tt := range tests {
+		size, lines, err := fitTitle(tt.title)
+		if err != nil {
+			t.Fatalf("fitTitle(%q): %v", tt.title, err)
+		}
+		if size > tt.maxSize || size <= 0 {
+			t.Errorf("fitTitle(%q) size %v, want positive and at most %v", tt.title, size, tt.maxSize)
+		}
+		f := mustFace(t, "fraktur", size)
+		for _, l := range lines {
+			if w := measure(f, l, 0); w > contentRight-contentLeft {
+				t.Errorf("fitTitle(%q): line %q is %d px, want at most %d", tt.title, l, w, contentRight-contentLeft)
+			}
+		}
+	}
+}
+
+func TestRenderDefaultTitleMatchesEmpty(t *testing.T) {
+	a, err := Render(goldenContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := goldenContent
+	named.Title = "The Daily Brief"
+	b, err := Render(named)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Error(`Title "The Daily Brief" renders differently from an empty Title`)
 	}
 }

@@ -15,6 +15,7 @@ func TestRenderAdversarialContent(t *testing.T) {
 		c    Content
 	}{
 		{"empty", Content{}},
+		{"title of glyphs the fonts lack", Content{Title: "日本語 🚀"}},
 		{"zero issue and date", Content{Lead: "Lead"}},
 		{"control characters", Content{Issue: 1, Date: goldenContent.Date, Lead: "a\x00b\x1b[31m\tc\r\nd", Topics: []string{"\x07Java\n"}}},
 		{"unbroken lead", Content{Issue: 1, Date: goldenContent.Date, Lead: long}},
@@ -37,7 +38,7 @@ func TestRenderAdversarialContent(t *testing.T) {
 }
 
 func TestFitLeadBreaksUnbrokenWords(t *testing.T) {
-	size, lines := fitLead(strings.Repeat("W", 300), leadWidth)
+	size, lines := fit(t, strings.Repeat("W", 300))
 	if len(lines) == 0 || len(lines) > 3 {
 		t.Fatalf("got %d lines, want 1 to 3", len(lines))
 	}
@@ -45,14 +46,14 @@ func TestFitLeadBreaksUnbrokenWords(t *testing.T) {
 }
 
 func TestFitLeadDropsControlCharacters(t *testing.T) {
-	_, lines := fitLead("a\x00b\nc\td\x1b", leadWidth)
+	_, lines := fit(t, "a\x00b\nc\td\x1b")
 	if got := strings.Join(lines, " "); got != "ab c d" {
 		t.Errorf("lines %q, want [ab c d]", got)
 	}
 }
 
 func TestFitLeadEmpty(t *testing.T) {
-	if size, lines := fitLead("  \n ", leadWidth); size != 66 || len(lines) != 0 {
+	if size, lines := fit(t, "  \n "); size != 66 || len(lines) != 0 {
 		t.Errorf("fitLead(blank) = %v, %q, want 66 and no lines", size, lines)
 	}
 }
@@ -60,7 +61,10 @@ func TestFitLeadEmpty(t *testing.T) {
 // Long topics must not squeeze the fixed right-hand label into an
 // ellipsis: it keeps room for two whole lines.
 func TestMetaColumnsKeepEditionWhole(t *testing.T) {
-	meta := newStyle("fell-sc", metaSize, metaSpacing)
+	meta, err := newStyle("fell-sc", metaSize, metaSpacing)
+	if err != nil {
+		t.Fatal(err)
+	}
 	long := strings.Repeat("Artificial Intelligence ", 10)
 	for _, left := range []string{"", "Java", long} {
 		lw, rw := meta.columns(left, "Edition of the Morning")
@@ -70,5 +74,26 @@ func TestMetaColumnsKeepEditionWhole(t *testing.T) {
 		if lines := wrap(meta.f, "Edition of the Morning", meta.spacing, rw); len(lines) > metaMaxLines {
 			t.Errorf("left %q: edition wraps to %q in %d px, want at most two lines", left, lines, rw)
 		}
+	}
+}
+
+// Leads and topics are capped before layout, so a runaway model reply
+// costs no more than a long headline.
+func TestRenderHugeLead(t *testing.T) {
+	huge := strings.Repeat("overlong ", 1<<20/9)
+	start := time.Now()
+	size, lines := fit(t, huge)
+	assertFits(t, size, lines, leadWidth)
+	if _, err := Render(Content{Issue: 1, Date: goldenContent.Date, Lead: huge, Topics: []string{huge, huge}, Title: huge}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("a 1 MB lead took %v, want well under 10s", d)
+	}
+}
+
+func TestCleanCapsLength(t *testing.T) {
+	if got := []rune(clean(strings.Repeat("é", 2000))); len(got) != maxRunes {
+		t.Errorf("clean kept %d runes, want %d", len(got), maxRunes)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -25,6 +26,7 @@ import (
 
 // Content is what changes from one day's cover to the next.
 type Content struct {
+	Title  string // the nameplate; empty means "The Daily Brief"
 	Issue  int
 	Date   time.Time
 	Topics []string // at most four are drawn
@@ -84,12 +86,12 @@ const (
 	leadMaxLines   = 3
 	leadWidth      = contentRight - contentLeft - 2*leadPadding
 
-	maxTopics = 4
-	ellipsis  = "..."
+	contentWidth = contentRight - contentLeft
+	defaultTitle = "The Daily Brief"
+	maxTopics    = 4
+	maxRunes     = 500 // cap on any one text after cleaning
+	ellipsis     = "..."
 )
-
-// The nameplate, broken as the 178px Fraktur breaks it in the frame.
-var nameplate = []string{"The Daily", "Brief"}
 
 // Render draws the cover for c and returns it as a PNG.
 func Render(c Content) ([]byte, error) {
@@ -97,8 +99,14 @@ func Render(c Content) ([]byte, error) {
 	draw.Draw(img, img.Bounds(), image.NewUniform(paper), image.Point{}, draw.Src)
 	drawFrame(img)
 
-	sm := newStyle("fell-sc", smSize, smSpacing)
-	meta := newStyle("fell-sc", metaSize, metaSpacing)
+	sm, err := newStyle("fell-sc", smSize, smSpacing)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := newStyle("fell-sc", metaSize, metaSpacing)
+	if err != nil {
+		return nil, err
+	}
 
 	y := float64(contentTop)
 	y = sm.centered(img, "Being a Record of the Day", y, ink)
@@ -115,10 +123,17 @@ func Render(c Content) ([]byte, error) {
 	drawRule(img, int(y))
 	y += ruleHeight + nameMarginTop
 
-	name := newStyle("fraktur", nameSize, 0)
-	for _, line := range nameplate {
-		name.centeredLine(img, line, y, nameSize*nameLineHeight, ink)
-		y += nameSize * nameLineHeight
+	nameSz, nameLines, err := fitTitle(c.Title)
+	if err != nil {
+		return nil, err
+	}
+	name, err := newStyle("fraktur", nameSz, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range nameLines {
+		name.centeredLine(img, line, y, nameSz*nameLineHeight, ink)
+		y += nameSz * nameLineHeight
 	}
 	y += ruleMargin
 	drawRule(img, int(y))
@@ -126,8 +141,14 @@ func Render(c Content) ([]byte, error) {
 	y = meta.row(img, topicsLine(c.Topics), "Edition of the Morning", y, red)
 	y += mastGap + leadMarginTop
 
-	size, lines := fitLead(c.Lead, leadWidth)
-	lead := newStyle("fell-italic", size, 0)
+	size, lines, err := fitLead(c.Lead, leadWidth)
+	if err != nil {
+		return nil, err
+	}
+	lead, err := newStyle("fell-italic", size, 0)
+	if err != nil {
+		return nil, err
+	}
 	for _, line := range lines {
 		lead.centeredLine(img, line, y, size*leadLineHeight, ink)
 		y += size * leadLineHeight
@@ -187,22 +208,74 @@ func topicsLine(topics []string) string {
 	return strings.Join(kept, " · ")
 }
 
+// titleLines cleans the title (empty means "The Daily Brief") and
+// breaks it at the space nearest its middle; one word stays one line.
+func titleLines(title string) []string {
+	t := clean(title)
+	if t == "" {
+		t = defaultTitle
+	}
+	runes := []rune(t)
+	n, split := len(runes), -1
+	for i, r := range runes {
+		if r == ' ' && (split < 0 || abs(2*i-n) < abs(2*split-n)) {
+			split = i
+		}
+	}
+	if split < 0 {
+		return []string{t}
+	}
+	return []string{string(runes[:split]), string(runes[split+1:])}
+}
+
+func abs(n int) int { return max(n, -n) }
+
+// fitTitle sets the nameplate in Fraktur at 178px, shrinking until every
+// line fits the frame's inner width.
+func fitTitle(title string) (size float64, lines []string, err error) {
+	lines = titleLines(title)
+	size = nameSize
+	for {
+		f, err := face("fraktur", size)
+		if err != nil {
+			return 0, nil, err
+		}
+		widest := 0
+		for _, l := range lines {
+			widest = max(widest, measure(f, l, 0))
+		}
+		if widest <= contentWidth || size <= 1 {
+			return size, lines, nil
+		}
+		// Width scales almost linearly with size: jump close, then step.
+		size = max(1, min(size-1, math.Floor(size*contentWidth/float64(widest))))
+	}
+}
+
 // fitLead sets the lead in the italic at 66px, shrinking by 4px down to
 // 44px until it takes at most three lines; past that the third line ends
 // with "...".
-func fitLead(text string, width int) (size float64, lines []string) {
+func fitLead(text string, width int) (size float64, lines []string, err error) {
 	text = clean(text)
-	for size = leadMax; size >= leadMin; size -= leadStep {
-		lines = wrap(face("fell-italic", size), text, 0, width)
+	for size = leadMax; ; size -= leadStep {
+		size = max(size, leadMin)
+		f, err := face("fell-italic", size)
+		if err != nil {
+			return 0, nil, err
+		}
+		lines = wrap(f, text, 0, width)
 		if len(lines) <= leadMaxLines {
-			return size, lines
+			return size, lines, nil
+		}
+		if size == leadMin {
+			return size, truncate(f, lines, leadMaxLines, 0, width), nil
 		}
 	}
-	return leadMin, truncate(face("fell-italic", leadMin), lines, leadMaxLines, 0, width)
 }
 
-// clean drops control characters and collapses runs of white space, so
-// model or feed text cannot smuggle layout into the cover.
+// clean drops control characters, collapses runs of white space and caps
+// the text at maxRunes, so model or feed text cannot smuggle layout into
+// the cover or make it slow.
 func clean(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
@@ -213,7 +286,11 @@ func clean(s string) string {
 		}
 		return r
 	}, s)
-	return strings.Join(strings.Fields(s), " ")
+	s = strings.Join(strings.Fields(s), " ")
+	if runes := []rune(s); len(runes) > maxRunes {
+		s = strings.TrimSpace(string(runes[:maxRunes]))
+	}
+	return s
 }
 
 var romanNumerals = []struct {
@@ -235,13 +312,11 @@ func roman(n int) string {
 	return b.String()
 }
 
-// face returns an embedded face. The names and sizes are this package's
-// constants and the fonts are embedded and tested, so a failure is a
-// build defect, not a runtime condition.
-func face(name string, size float64) font.Face {
+// face returns an embedded face.
+func face(name string, size float64) (font.Face, error) {
 	f, err := fonts.Face(name, size)
 	if err != nil {
-		panic(fmt.Sprintf("cover: %v", err))
+		return nil, fmt.Errorf("cover: %w", err)
 	}
-	return f
+	return f, nil
 }

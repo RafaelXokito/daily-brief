@@ -25,20 +25,34 @@ type style struct {
 // size, scaled down, are the font's unhinted design metrics.
 const metricsSize = 2048
 
-func newStyle(name string, size, spacingEm float64) style {
-	m := face(name, metricsSize).Metrics()
-	k := size / metricsSize / 64
-	asc := math.Round(float64(m.Ascent) * k)
-	desc := math.Round(float64(m.Descent) * k)
-	gap := math.Round(float64(m.Height-m.Ascent-m.Descent) * k)
+func newStyle(name string, size, spacingEm float64) (style, error) {
+	big, err := face(name, metricsSize)
+	if err != nil {
+		return style{}, err
+	}
+	f, err := face(name, size)
+	if err != nil {
+		return style{}, err
+	}
+	m := big.Metrics()
+	k := size / metricsSize
+	asc := math.Round(px(m.Ascent) * k)
+	desc := math.Round(px(m.Descent) * k)
+	gap := math.Round(px(m.Height-m.Ascent-m.Descent) * k)
 	return style{
-		f:       face(name, size),
-		spacing: fixed.Int26_6(math.Round(spacingEm * size * 64)),
+		f:       f,
+		spacing: toFixed(spacingEm * size),
 		asc:     asc,
 		desc:    desc,
 		normal:  asc + desc + max(gap, 0),
-	}
+	}, nil
 }
+
+// px converts a 26.6 fixed-point length to pixels.
+func px(v fixed.Int26_6) float64 { return float64(v) / 64 }
+
+// toFixed converts pixels to 26.6 fixed point.
+func toFixed(x float64) fixed.Int26_6 { return fixed.Int26_6(math.Round(x * 64)) }
 
 // lineHeight is CSS line-height:normal: ascent, descent and line gap.
 func (s style) lineHeight() float64 {
@@ -60,7 +74,7 @@ func (s style) centered(img draw.Image, text string, top float64, col color.Colo
 }
 
 func (s style) centeredLine(img draw.Image, text string, top, lh float64, col color.Color) {
-	x := centerX - float64(advance(s.f, text, s.spacing))/128
+	x := centerX - px(advance(s.f, text, s.spacing))/2
 	s.draw(img, x, s.baseline(top, lh), text, col)
 }
 
@@ -77,7 +91,7 @@ func (s style) row(img draw.Image, left, right string, top float64, rightCol col
 		s.draw(img, contentLeft, s.baseline(top+float64(i)*lh, lh), line, ink)
 	}
 	for i, line := range rl {
-		x := contentRight - float64(advance(s.f, line, s.spacing))/64
+		x := contentRight - px(advance(s.f, line, s.spacing))
 		s.draw(img, x, s.baseline(top+float64(i)*lh, lh), line, rightCol)
 	}
 	return top + float64(max(len(ll), len(rl)))*lh
@@ -87,7 +101,7 @@ func (s style) row(img draw.Image, left, right string, top float64, rightCol col
 // the right text, a fixed label, always keeps room for two whole lines, so
 // long topics cannot squeeze it into an ellipsis.
 func (s style) columns(left, right string) (lw, rw int) {
-	avail := contentRight - contentLeft - metaGap
+	avail := contentWidth - metaGap
 	lw, rw = shareWidth(measure(s.f, left, s.spacing), measure(s.f, right, s.spacing), avail)
 	if need := min(s.twoLineWidth(right), avail); rw < need {
 		lw, rw = avail-need, need
@@ -122,7 +136,7 @@ func shareWidth(a, b, avail int) (int, int) {
 // letter-spaced.
 func (s style) draw(img draw.Image, x, baseline float64, text string, col color.Color) {
 	src := image.NewUniform(col)
-	dot := fixed.Point26_6{X: fixed.Int26_6(math.Round(x * 64)), Y: fixed.I(int(baseline))}
+	dot := fixed.Point26_6{X: toFixed(x), Y: fixed.I(int(baseline))}
 	prev := rune(-1)
 	for _, r := range text {
 		if prev >= 0 {
