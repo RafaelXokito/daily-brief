@@ -1,5 +1,5 @@
 // Package epub assembles an EPUB 3 book: a cover page, XHTML chapters,
-// a nav document and an NCX, the paper's stylesheet and the embedded
+// their JPEG pictures, a nav document and an NCX, the paper's stylesheet and the embedded
 // fonts with their licences.
 package epub
 
@@ -27,6 +27,13 @@ type Chapter struct {
 	File, TOCTitle, Body string
 }
 
+// Image is a JPEG picture stored as img/<Name>, which chapters reference
+// as "img/<Name>". Name is a plain name such as "ch1.jpg".
+type Image struct {
+	Name string
+	Data []byte
+}
+
 // Book is everything Build puts in the EPUB. Cover is a PNG. An empty
 // Language means "en" and an empty Creator "The Daily Brief".
 type Book struct {
@@ -34,6 +41,7 @@ type Book struct {
 	Date                                 time.Time
 	Cover                                []byte
 	Chapters                             []Chapter
+	Images                               []Image
 }
 
 // entry is one file of the zip.
@@ -78,6 +86,9 @@ func Build(b Book) ([]byte, error) {
 	}
 	for _, c := range b.Chapters {
 		entries = append(entries, entry{"EPUB/" + c.File, xhtml(b.Language, c.TOCTitle, c.Body, "")})
+	}
+	for _, img := range b.Images {
+		entries = append(entries, entry{"EPUB/img/" + img.Name, img.Data})
 	}
 	return zipUp(entries)
 }
@@ -126,8 +137,7 @@ func validate(b Book) error {
 	}
 	seen := map[string]bool{}
 	for _, c := range b.Chapters {
-		if c.File != path.Base(c.File) || strings.ContainsAny(c.File, `\:`) || !strings.HasSuffix(c.File, ".xhtml") ||
-			len(c.File) == len(".xhtml") || c.File[0] == '.' {
+		if !plainName(c.File, ".xhtml") {
 			return fmt.Errorf("epub: bad chapter file name %q", c.File)
 		}
 		if reserved[c.File] || seen[c.File] {
@@ -135,7 +145,30 @@ func validate(b Book) error {
 		}
 		seen[c.File] = true
 	}
+	seenImg := map[string]bool{}
+	for _, img := range b.Images {
+		if !plainName(img.Name, ".jpg") {
+			return fmt.Errorf("epub: bad image name %q", img.Name)
+		}
+		if seenImg[img.Name] {
+			return fmt.Errorf("epub: image name %q is taken", img.Name)
+		}
+		if !bytes.HasPrefix(img.Data, jpegMagic) {
+			return fmt.Errorf("epub: image %q is not a JPEG", img.Name)
+		}
+		seenImg[img.Name] = true
+	}
 	return nil
+}
+
+// jpegMagic starts every JPEG file.
+var jpegMagic = []byte{0xff, 0xd8, 0xff}
+
+// plainName reports whether name is a bare file name ending in ext, with
+// no directory, no drive or backslash, and not hidden.
+func plainName(name, ext string) bool {
+	return name == path.Base(name) && !strings.ContainsAny(name, `\:`) && strings.HasSuffix(name, ext) &&
+		len(name) > len(ext) && name[0] != '.'
 }
 
 const container = `<?xml version="1.0" encoding="utf-8"?>
@@ -183,6 +216,9 @@ func opf(b Book, fontFiles []fs.DirEntry) []byte {
 			mt = "text/plain"
 		}
 		fmt.Fprintf(&m, `<item id="f%d" href="fonts/%s" media-type="%s"/>`, i, esc(f.Name()), mt)
+	}
+	for i, img := range b.Images {
+		fmt.Fprintf(&m, `<item id="i%d" href="img/%s" media-type="image/jpeg"/>`, i, esc(img.Name))
 	}
 	s.WriteString(`<itemref idref="cover" linear="yes"/>`)
 	for i, c := range b.Chapters {

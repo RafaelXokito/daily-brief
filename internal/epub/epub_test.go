@@ -267,3 +267,72 @@ func TestBuildCreatorAndLanguage(t *testing.T) {
 		}
 	}
 }
+
+var fakeJPEG = []byte("\xff\xd8\xff\xe0 invented picture bytes")
+
+func TestBuildWithImages(t *testing.T) {
+	b := sampleBook()
+	b.Chapters = append([]Chapter(nil), b.Chapters...)
+	b.Chapters[1].Body += `<img src="img/ch1.jpg" alt="A story"/>`
+	b.Images = []Image{{Name: "ch1.jpg", Data: fakeJPEG}}
+	files := build(t, b)
+	if !bytes.Equal(files["EPUB/img/ch1.jpg"], fakeJPEG) {
+		t.Errorf("EPUB/img/ch1.jpg missing or not the picture")
+	}
+	var p opfDoc
+	if err := xml.Unmarshal(files["EPUB/content.opf"], &p); err != nil {
+		t.Fatalf("OPF does not parse: %v", err)
+	}
+	found := false
+	for _, it := range p.Items {
+		if it.Href == "img/ch1.jpg" {
+			found = true
+			if it.MediaType != "image/jpeg" {
+				t.Errorf("img/ch1.jpg media type %q, want image/jpeg", it.MediaType)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("manifest lacks img/ch1.jpg")
+	}
+	ids := map[string]bool{}
+	for _, it := range p.Items {
+		if ids[it.ID] {
+			t.Errorf("manifest id %q used twice", it.ID)
+		}
+		ids[it.ID] = true
+	}
+	for _, r := range p.Spine.Refs {
+		if r.IDRef != "" && strings.HasPrefix(r.IDRef, "i") {
+			t.Errorf("a picture %q is in the spine", r.IDRef)
+		}
+	}
+}
+
+func TestBuildRefusesBadImages(t *testing.T) {
+	tests := map[string]Image{
+		"path":           {Name: "../ch1.jpg", Data: fakeJPEG},
+		"subdirectory":   {Name: "x/ch1.jpg", Data: fakeJPEG},
+		"backslash":      {Name: `x\ch1.jpg`, Data: fakeJPEG},
+		"colon":          {Name: "c:ch1.jpg", Data: fakeJPEG},
+		"not jpg":        {Name: "ch1.png", Data: fakeJPEG},
+		"bare extension": {Name: ".jpg", Data: fakeJPEG},
+		"hidden":         {Name: ".ch1.jpg", Data: fakeJPEG},
+		"not a jpeg":     {Name: "ch1.jpg", Data: fakePNG},
+		"empty":          {Name: "ch1.jpg"},
+	}
+	for name, img := range tests {
+		t.Run(name, func(t *testing.T) {
+			b := sampleBook()
+			b.Images = []Image{img}
+			if _, err := Build(b); err == nil {
+				t.Errorf("Build accepted image %q", img.Name)
+			}
+		})
+	}
+	b := sampleBook()
+	b.Images = []Image{{Name: "ch1.jpg", Data: fakeJPEG}, {Name: "ch1.jpg", Data: fakeJPEG}}
+	if _, err := Build(b); err == nil {
+		t.Error("Build accepted two pictures with one name")
+	}
+}
